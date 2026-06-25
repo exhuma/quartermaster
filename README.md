@@ -391,8 +391,8 @@ recorded in each kit's `CHANGELOG.md` without creating a new folder. Use
 `compare_kit_versions` via the MCP server to see what changed between two
 versions and whether the change affects end-users.
 
-For the full kit structure and authoring rules, see the catalog
-repository's own documentation.
+For the full kit structure, metadata schema, and versioning rules, see
+[`AUTHORING_KITS.md`](AUTHORING_KITS.md).
 
 ---
 

@@ -3,7 +3,7 @@ name: Build & Push MCP server image
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - "v*"
 
@@ -48,7 +48,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            # Tag every master push with :latest
+            # Tag every main push with :latest
             type=raw,value=latest,enable={{is_default_branch}}
             # Strip the leading 'v' from CalVer git tags
             # Works with any number of components (e.g. v2026.3.25.1 → 2026.3.25.1)
