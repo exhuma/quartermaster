@@ -1,0 +1,15 @@
+# Build context is the repository root. The kit catalog (the data) is never
+# part of this repo or image — it is supplied at runtime via a mounted
+# volume. This entry is a guard in case a catalog is checked out here.
+kits/
+
+# Never ship local dev artefacts or caches.
+.git/
+**/node_modules/
+**/dist/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+server/var/
+**/.env
+.claude/

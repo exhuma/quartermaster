@@ -1,0 +1,10 @@
+# Dependencies and build output — never committed.
+node_modules/
+dist/
+
+# Vite local cache.
+.vite/
+
+# Local environment overrides.
+.env
+.env.local

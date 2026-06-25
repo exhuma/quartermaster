@@ -1,0 +1,60 @@
+name: Tests
+
+# Reusable workflow: backend (pytest) and web-UI (vitest + build + the
+# dev-auth dead-code-elimination guard). Called by the release workflow via
+# `workflow_call` + `needs:` so the image is never published unless this
+# passes.
+on:
+  workflow_call:
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Sync dependencies
+        working-directory: server
+        run: uv sync --frozen
+
+      - name: Run tests
+        working-directory: server
+        run: uv run pytest
+
+  webui:
+    name: Web UI (vitest + build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: webui
+        run: npm ci
+
+      - name: Unit tests
+        working-directory: webui
+        run: npm run test
+
+      - name: Production build (type-check + bundle)
+        working-directory: webui
+        run: npm run build
+
+      # Security gate: the dev-only auth bypass must be dead-code-eliminated
+      # from the production bundle. Fails the build if any dev-auth code
+      # leaked into dist/.
+      - name: Assert no dev-auth in the production bundle
+        working-directory: webui
+        run: npm run check:no-dev-auth

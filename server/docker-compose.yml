@@ -1,0 +1,60 @@
+# Docker Compose file for self-hosting behind a Traefik v3 reverse proxy.
+#
+# Prerequisites:
+#   - An external Docker network named "traefik-proxy" must exist:
+#       docker network create traefik-proxy
+#   - A Traefik v3 instance must already be running on that network,
+#     configured with an entrypoint named "websecure" (port 443) and a
+#     TLS certificate resolver named "letsencrypt".
+#
+# Deployment:
+#   cp .env.example .env   # fill in all required values
+#   docker compose up -d
+#
+# Build:
+#   Build context is the repository root (one level up) — the core image is
+#   the server plus the built web UI. The kit catalog is NOT baked in (it is
+#   excluded by .dockerignore) and is supplied at runtime via the volume
+#   below. Run from this directory: docker compose build
+
+services:
+  quartermaster:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # The kit catalog is mounted at /data/kits (see volumes below);
+      # point the server at it. Overrides any KITS_ROOT in .env.
+      - KITS_ROOT=/data/kits
+    volumes:
+      # ADAPT: bind-mount your kit catalog here. The catalog is NOT part of
+      # this repo; point this at your own (possibly private) kit-catalog
+      # checkout. Writes via the WebDAV endpoint land here and are
+      # immediately visible to the MCP — no restart required.
+      - /path/to/your/kit-catalog:/data/kits
+    networks:
+      - traefik-proxy
+    labels:
+      # ADAPT: replace the hostname with your actual domain.
+      - "traefik.enable=true"
+      - "traefik.http.routers.quartermaster.rule=\
+         Host(`quartermaster.example.com`)"
+      - "traefik.http.routers.quartermaster.entrypoints=websecure"
+      - "traefik.http.routers.quartermaster.tls=true"
+      # ADAPT: set to your Traefik cert resolver name if different.
+      - "traefik.http.routers.quartermaster.tls.certresolver=\
+         letsencrypt"
+      - "traefik.http.services.quartermaster\
+         .loadbalancer.server.port=8000"
+    # No Traefik authentication middleware — auth terminates inside the
+    # application via JWTAuthMiddleware. The single router above already
+    # covers every path on the host, including the web UI, /api, the MCP
+    # mount, and the /dav WebDAV endpoint. Because Traefik terminates TLS
+    # (entrypoint websecure + tls), /dav is reached over HTTPS, satisfying
+    # DAV_REQUIRE_TLS — WebDAV Basic credentials never travel in cleartext.
+
+networks:
+  traefik-proxy:
+    external: true

@@ -1,0 +1,12 @@
+# Python virtual environment — never committed.
+.venv/
+
+# Local environment overrides — contains real secrets.
+.env
+
+# Byte-compiled cache.
+__pycache__/
+*.pyc
+
+# Local mutable data (dev-only default for the client registry).
+var/

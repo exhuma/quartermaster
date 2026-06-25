@@ -1,0 +1,25 @@
+[project]
+name = "quartermaster"
+version = "0.1.0"
+description = "Keycloak-gated MCP server that serves AI instruction kits."
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "a2wsgi>=1.10.10",
+    "fastapi>=0.115",
+    "fastmcp>=3.1.1",
+    "gouge>=2.2.5",
+    "pydantic-settings>=2.7",
+    "pyjwt[crypto]>=2.10",
+    "uvicorn[standard]>=0.34",
+    "wsgidav>=4.3.4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.28",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

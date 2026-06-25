@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quartermaster</title>
+    <!--
+      Load the runtime config BEFORE the app bundle. In production the
+      server serves /config.js rendered from its settings; in local dev
+      the committed public/config.js stub leaves window.__APP_CONFIG__
+      empty so src/config.ts falls back to VITE_* (see config.ts).
+    -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

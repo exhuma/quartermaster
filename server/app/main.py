@@ -1,0 +1,676 @@
+"""FastAPI + FastMCP application entry point.
+
+Outer FastAPI application that:
+
+- Exposes a public ``GET /health`` liveness probe.
+- Exposes a public ``GET /.well-known/oauth-protected-resource``
+  metadata document (RFC 9728) so that OAuth-aware clients such as
+  VS Code can discover the Keycloak authorization server automatically.
+- Mounts a FastMCP streamable-HTTP endpoint at ``/kits/mcp`` with V2
+    discovery + content tools: ``list_kits``, ``list_available_traits``,
+    ``list_prompts``, ``get_prompt``, ``check_existing_gap_issue``,
+    ``request_clarification_or_addition``, ``select_kits``,
+    ``explain_kit_candidate``, ``get_kit``, ``list_kit_versions``,
+    and ``compare_kit_versions``.  The mount also ships server-level
+    ``instructions`` (see :data:`MCP_INSTRUCTIONS`) describing the
+    intended per-task trait-reflection workflow; clients receive it in
+    the MCP ``initialize`` response.
+- Applies :class:`~app.auth.JWTAuthMiddleware` to every request,
+  protecting the ``/kits/mcp`` mount while leaving the public endpoints
+  open.
+
+Start the server from the ``server/`` directory:
+
+.. code-block:: console
+
+    uv run uvicorn app.main:app --reload
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+from gouge.colourcli import Simple
+
+Simple.basicConfig(level=logging.DEBUG)
+logging.getLogger("sse_starlette").setLevel(logging.INFO)
+
+from fastmcp import FastMCP
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
+
+from app.auth import JWTAuthMiddleware
+from app.config import get_settings
+from app.kits import (
+    KitConflictError,
+    KitNotFoundError,
+    KitSectionNotFoundError,
+    KitValidationError,
+    KitVersionNotFoundError,
+    compare_kit_versions as _compare_kit_versions,
+    explain_kit_v2,
+    list_all_kits,
+    list_available_traits_v2,
+    list_catalog_v2,
+    read_kit,
+    read_kit_outline,
+    select_kits_v2,
+)
+from app.dav.webdav_app import mount_dav
+from app.routers import app_tokens, clients, kits_admin, integration
+from app.storage.kit_writes import KitPathError
+from app.user_agent import UserAgentMiddleware
+from app.webui import mount_webui
+from app.prompts import get_canned_prompt as _get_canned_prompt
+from app.prompts import list_canned_prompts as _list_canned_prompts
+from app.requests import (
+    check_existing_kit_extension_issue as _check_existing_kit_extension_issue,
+)
+from app.requests import request_kit_extension as _request_kit_extension
+
+# ---------------------------------------------------------------------------
+# MCP server
+# ---------------------------------------------------------------------------
+
+MCP_INSTRUCTIONS = """\
+This MCP serves versioned AI *instruction kits* — agent-facing guidance for
+specific architecture, tooling, and capability choices (for example: local
+auth, OIDC, a FastAPI + Vuetify stack). Kits are loaded on demand as extra
+context; their files are never copied into the target project.
+
+**Use kits per task, not once per project.** Avoid hard-coding a fixed kit
+list in CLAUDE.md / AGENTS.md — a fixed list loads too much or too little. The
+traits a task touches often only emerge during the conversation: a request to
+"add authentication" may resolve to OIDC after some discussion, bringing OIDC
+kits into scope that were irrelevant before. A static list cannot react to
+that.
+
+For each new task:
+
+1. **Discover coverage** — call `list_available_traits` for the trait
+   vocabulary (languages, frameworks, capabilities, contexts) and `list_kits`
+   for the available kits.
+2. **Map the task to traits** — infer which of those traits the task touches
+   from the repository and the developer's intent; revisit as the task's
+   direction firms up.
+3. **Load matching guidance** — call `select_kits` with the task's traits (use
+   `broaden=True` if `broadening_recommended` is set), narrow with
+   `explain_kit_candidate`, then load each chosen kit. Re-run this when new
+   traits come into scope mid-task.
+4. **Load lean** — call `get_kit_outline` to see a kit's sections, then
+   `get_kit` with `sections=[…]` to pull only the sections the current step
+   needs (start with the ones flagged `always_load`). Read a kit's full text
+   (omit `sections`) only when you're implementing all of it. For tasks that
+   touch several kits, load each kit's content when you reach that aspect, not
+   all up front.
+
+If the task needs a capability no kit covers, call `check_existing_gap_issue`
+and then `request_clarification_or_addition` to file a gap. Hard-coding kits is
+acceptable only when a project's relevant kits are genuinely stable; otherwise
+prefer per-task reflection.
+"""
+
+mcp = FastMCP("quartermaster", instructions=MCP_INSTRUCTIONS)
+
+
+@mcp.tool
+def list_kits() -> list[dict]:
+    """
+    List compact V2 discovery metadata for all available kits.
+
+    The response is intentionally signal-dense and short to support
+    trait-driven narrowing before loading full kit content.
+
+    :returns: List of compact kit metadata entries.
+    """
+    return list_catalog_v2()
+
+
+@mcp.tool
+def list_available_traits() -> dict:
+    """
+    List known trait vocabularies across all kit manifests.
+
+    Use this endpoint to discover supported trait values for
+    ``select_kits`` and to identify unknown traits in a project.
+
+    :returns: Aggregated trait keys and normalized vocab lists. The
+        ``warnings`` field lists any kits whose applicability manifest
+        could not be loaded (and were therefore skipped).
+    """
+    return list_available_traits_v2()
+
+
+@mcp.tool
+def list_prompts() -> list[dict]:
+    """
+    List canned MCP usage prompts.
+
+    :returns: Prompt descriptors with ``name``, ``title``, ``intent``,
+        and ``prompt_template``.
+    """
+    return _list_canned_prompts()
+
+
+@mcp.tool
+def get_prompt(name: str) -> dict:
+    """
+    Return a canned prompt definition by name.
+
+    :param name: Prompt name from ``list_prompts``.
+    :returns: Prompt definition object.
+    :raises ValueError: If *name* is unknown.
+    """
+    try:
+        return _get_canned_prompt(name)
+    except KeyError as exc:
+        raise ValueError(f"Prompt not found: {name!r}") from exc
+
+
+@mcp.tool
+def check_existing_gap_issue(
+    title: str,
+    summary: str,
+    discovered_traits: list[str] | None = None,
+    missing_tools: list[str] | None = None,
+    details: str | None = None,
+) -> dict:
+    """
+    Check whether a matching gap issue already exists on GitHub.
+
+    Use this before ``request_clarification_or_addition`` to avoid
+    creating duplicate issues for the same gap.
+
+    :param title: Short request title.
+    :param summary: Short problem summary.
+    :param discovered_traits: Optional trait labels discovered locally.
+    :param missing_tools: Optional missing MCP capability names.
+    :param details: Optional free-form details.
+    :returns: Match status and existing issue metadata when found.
+    :raises ValueError: If required fields are empty or GitHub
+        search fails.
+    """
+    return _check_existing_kit_extension_issue(
+        title=title,
+        summary=summary,
+        discovered_traits=discovered_traits,
+        missing_tools=missing_tools,
+        details=details,
+    )
+
+
+@mcp.tool
+def request_clarification_or_addition(
+    title: str,
+    summary: str,
+    discovered_traits: list[str] | None = None,
+    missing_tools: list[str] | None = None,
+    details: str | None = None,
+) -> dict:
+    """
+    Submit a clarification or MCP-extension request.
+
+    Requests are materialized as GitHub issues when the required
+    repository and token settings are configured. If a matching open
+    issue already exists, no new issue is created and that issue is
+    returned as a duplicate.
+
+    :param title: Short request title.
+    :param summary: Short problem summary.
+    :param discovered_traits: Optional trait labels discovered locally.
+    :param missing_tools: Optional missing MCP capability names.
+    :param details: Optional free-form details.
+    :returns: Created issue metadata or duplicate-match metadata and
+        normalized request payload.
+    :raises ValueError: If required fields are empty or GitHub
+        issue creation fails.
+    """
+    return _request_kit_extension(
+        title=title,
+        summary=summary,
+        discovered_traits=discovered_traits,
+        missing_tools=missing_tools,
+        details=details,
+    )
+
+
+@mcp.tool
+def select_kits(
+    languages: list[str] | None = None,
+    frameworks: list[str] | None = None,
+    capabilities: list[str] | None = None,
+    contexts: list[str] | None = None,
+    broaden: bool = False,
+    limit: int = 8,
+) -> dict:
+    """
+    Select and rank candidate kits from structured project traits.
+
+    Use this as the primary V2 discovery entry-point. Call again with
+    ``broaden=True`` when ``broadening_recommended`` is true.
+
+    :param languages: Language hints, e.g. ``["python"]``.
+    :param frameworks: Framework hints, e.g. ``["fastapi"]``.
+    :param capabilities: Capability hints, e.g. ``["auth"]``.
+    :param contexts: Context hints, e.g. ``["docs"]``.
+    :param broaden: Lower selection threshold for recall recovery.
+    :param limit: Maximum candidates to return (bounded internally).
+    :returns: Candidate list plus confidence and coverage diagnostics. The
+        ``warnings`` field lists any kits whose applicability manifest could
+        not be loaded (and were therefore skipped during ranking).
+    """
+    return select_kits_v2(
+        languages=languages,
+        frameworks=frameworks,
+        capabilities=capabilities,
+        contexts=contexts,
+        broaden=broaden,
+        limit=limit,
+    )
+
+
+@mcp.tool
+def explain_kit_candidate(
+    name: str,
+    languages: list[str] | None = None,
+    frameworks: list[str] | None = None,
+    capabilities: list[str] | None = None,
+    contexts: list[str] | None = None,
+) -> dict:
+    """
+    Explain applicability for one specific kit against project traits.
+
+    Call this after ``select_kits`` for the shortlist only.
+
+    :param name: Kit name to evaluate.
+    :param languages: Language hints.
+    :param frameworks: Framework hints.
+    :param capabilities: Capability hints.
+    :param contexts: Context hints.
+    :returns: Structured explanation with score and constraint details.
+    :raises ValueError: If *name* does not match any known kit.
+    """
+    try:
+        return explain_kit_v2(
+            name=name,
+            languages=languages,
+            frameworks=frameworks,
+            capabilities=capabilities,
+            contexts=contexts,
+        )
+    except KitNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+@mcp.tool
+def get_kit_outline(name: str, version: str | None = None) -> dict:
+    """
+    Return a cheap section map for a kit before loading its content.
+
+    Read this first to see which sections a kit contains, then call
+    ``get_kit`` with ``sections=[…]`` to pull only the sections the
+    current step needs. Sections flagged ``always_load`` hold the kit's
+    core invariants and should usually be loaded first.
+
+    :param name: Kit name, e.g. ``module-database-postgresql``.
+    :param version: Major version string, e.g. ``"v1"``.  When omitted
+        the latest available version is used.
+    :returns: ``{name, version, summary, sections}`` where each section
+        is ``{id, title, gloss, always_load, bytes}``.
+    :raises ValueError: If *name* does not match any known kit, or if
+        *version* is not available for that kit.
+    """
+    try:
+        return read_kit_outline(name, version)
+    except KitNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    except KitVersionNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+@mcp.tool
+def get_kit(
+    name: str,
+    version: str | None = None,
+    sections: list[str] | None = None,
+) -> str:
+    """
+    Return instruction content for the named kit.
+
+    Load the kit identified by *name* (as returned by ``list_kits``)
+    and return its Markdown text.  Pass this text to the agent in the
+    system context or as a file reference to activate the kit's
+    guard-rails for the current session.
+
+    Prefer loading only what the current step needs: call
+    ``get_kit_outline`` first, then pass *sections* to pull just those
+    sections. Omit *sections* to get the complete instructions.
+
+    :param name: Kit name, e.g. ``stack-fastapi-vuetify`` or
+        ``module-auth-local``.
+    :param version: Major version string, e.g. ``"v1"``.  When
+        omitted the latest available version is returned.
+    :param sections: Optional section ids from ``get_kit_outline``.
+        When omitted, the full instructions are returned.
+    :returns: UTF-8 Markdown for the requested sections (or the whole
+        kit when *sections* is omitted).
+    :raises ValueError: If *name* does not match any known kit, if
+        *version* is not available, or if a section id is unknown.
+    """
+    try:
+        return read_kit(name, version, sections)
+    except KitNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    except KitVersionNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    except KitSectionNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+@mcp.tool
+def list_kit_versions(name: str) -> list[str]:
+    """
+    List the available major versions of a single instruction kit.
+
+    :param name: Kit name as returned by ``list_kits``.
+    :returns: List of major version strings, oldest first, e.g.
+        ``["v1", "v2"]``.
+    :raises ValueError: If *name* does not match any known kit.
+    """
+    kits = {k.name: k for k in list_all_kits()}
+    if name not in kits:
+        raise ValueError(f"Kit not found: {name!r}")
+    return kits[name].versions
+
+
+@mcp.tool
+def compare_kit_versions(
+    name: str,
+    from_version: str,
+    to_version: str,
+) -> dict:
+    """
+    Summarise changes between two versions of an instruction kit.
+
+    Reads the kit's ``CHANGELOG.md`` and returns all changelog
+    sections that fall strictly after *from_version* and up to and
+    including *to_version*.  Both major versions (e.g. ``"v1"`` →
+    ``"v2"``) and minor/patch releases (e.g. ``"v1.0.0"`` →
+    ``"v1.2.0"``) are supported.  The argument order does not matter —
+    the lower version is always used as the exclusive lower bound.
+
+    .. warning::
+
+        When ``user_facing_warning`` is ``True``, the changes contain
+        modifications that may affect **end-users** of any project
+        built with this kit (for example: changes to authentication
+        flows, API shapes, URL routes, passwords, tokens, sessions, or
+        database schemas).  Review carefully before upgrading.
+
+    :param name: Kit name as returned by ``list_kits``.
+    :param from_version: One end of the version range (exclusive),
+        e.g. ``"v1.0.0"`` or ``"v1"``.
+    :param to_version: Other end of the version range (inclusive),
+        e.g. ``"v2.0.0"`` or ``"v2"``.
+    :returns: Dict with keys:
+
+        ``changes``
+            List of ``{"version": str, "summary": str}`` dicts for
+            each changelog section in the requested range, ordered
+            from oldest to newest.
+
+        ``user_facing_warning``
+            ``True`` when any change section contains keywords
+            suggesting an impact on end-users of projects that use
+            this kit.
+
+    :raises ValueError: If *name* does not match any known kit, or if
+        the kit has no ``CHANGELOG.md``.
+    """
+    try:
+        return _compare_kit_versions(name, from_version, to_version)
+    except KitNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Outer FastAPI application
+# ---------------------------------------------------------------------------
+#
+# The public well-known / health handlers are defined at module level and
+# wired into the app inside :func:`create_app`.  Keeping construction in an
+# application factory (per the module-fastapi kit) lets tests build isolated
+# app instances and gives later phases a single place to register the
+# ``/api`` admin routers and the ``/dav`` WebDAV mount.
+
+
+async def health() -> dict:
+    """
+    Liveness probe.
+
+    No authentication is required.
+
+    :returns: ``{"status": "ok"}``
+    """
+    return {"status": "ok"}
+
+
+async def oauth_protected_resource_metadata() -> JSONResponse:
+    """
+    OAuth 2.0 Protected Resource Metadata (RFC 9728).
+
+    Advertises the authorization server(s) that can issue tokens for
+    this resource.  OAuth-aware clients (e.g. VS Code MCP integration)
+    fetch this document after receiving a ``401`` with a
+    ``WWW-Authenticate`` header pointing here, then initiate an
+    authorization-code + PKCE flow automatically.
+
+    No authentication is required to fetch this document.
+
+    :returns: RFC 9728-compliant JSON metadata document.
+    """
+    settings = get_settings()
+    resource = settings.server_origin
+    logger.debug("oauth-protected-resource (root): resource=%s", resource)
+    return JSONResponse(
+        {
+            "resource": resource,
+            "authorization_servers": [settings.keycloak_issuer],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": settings.oauth_scopes,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def oauth_protected_resource_metadata_path(path: str) -> JSONResponse:
+    """
+    RFC 9728 path-specific Protected Resource Metadata.
+
+    Clients that discover authorization requirements for a resource at
+    ``{origin}/{path}`` fetch
+    ``{origin}/.well-known/oauth-protected-resource/{path}`` per
+    RFC 9728 §3.  Return the same authorization-server advertisement
+    as the root well-known document.
+
+    No authentication is required to fetch this document.
+
+    :param path: Resource path appended by the client (e.g. ``kits/mcp``).
+    :returns: RFC 9728-compliant JSON metadata document.
+    """
+    settings = get_settings()
+    resource = f"{settings.server_origin}/{path}"
+    logger.debug(
+        "oauth-protected-resource (path-specific): path=%r resource=%s", path, resource
+    )
+    return JSONResponse(
+        {
+            "resource": resource,
+            "authorization_servers": [settings.keycloak_issuer],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": settings.oauth_scopes,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+async def oauth_authorization_server_metadata() -> JSONResponse:
+    """
+    OAuth 2.0 Authorization Server Metadata (RFC 8414).
+
+    Some OAuth clients (including VS Code's MCP integration) discover
+    the authorization server by fetching this document from the
+    resource server's origin before following the RFC 9728 chain.
+    This document advertises Keycloak's endpoints directly so that
+    clients redirect the browser to Keycloak without any proxy.
+
+    No authentication is required to fetch this document.
+
+    :returns: RFC 8414-compliant JSON metadata document.
+    """
+    settings = get_settings()
+    return JSONResponse(
+        {
+            # issuer MUST match this server's origin per RFC 8414 §3.3,
+            # not the Keycloak URL.  Keycloak's URL is only used internally
+            # for JWT validation (keycloak_issuer) and as the endpoint base.
+            "issuer": settings.server_origin,
+            "authorization_endpoint": settings.authorization_endpoint,
+            "token_endpoint": settings.token_endpoint,
+            "jwks_uri": settings.jwks_url,
+            "response_types_supported": ["code"],
+            "grant_types_supported": [
+                "authorization_code",
+                "refresh_token",
+            ],
+            "code_challenge_methods_supported": ["S256"],
+            "token_endpoint_auth_methods_supported": ["none"],
+            "scopes_supported": settings.oauth_scopes,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# Map kit-domain exceptions to HTTP status codes for the /api routers.
+# (HTTPException would couple the service layer to FastAPI; instead the
+# thin routers let domain exceptions propagate and we translate here.)
+_EXCEPTION_STATUS: dict[type[Exception], int] = {
+    KitNotFoundError: 404,
+    KitVersionNotFoundError: 404,
+    KitSectionNotFoundError: 404,
+    KitConflictError: 409,
+    KitValidationError: 422,
+    KitPathError: 400,
+}
+
+
+def _register_exception_handlers(application: FastAPI) -> None:
+    """
+    Register handlers translating kit-domain exceptions to HTTP errors.
+
+    :param application: The FastAPI app to attach handlers to.
+    """
+
+    def _make_handler(code: int):
+        async def _handler(_request: Request, exc: Exception) -> JSONResponse:
+            return JSONResponse(
+                status_code=code, content={"detail": str(exc)}
+            )
+
+        return _handler
+
+    for exc_type, code in _EXCEPTION_STATUS.items():
+        application.add_exception_handler(exc_type, _make_handler(code))
+
+
+def create_app() -> FastAPI:
+    """
+    Build and return the outer FastAPI application.
+
+    Wires the public health/well-known endpoints and the ``/api`` admin
+    routers, mounts the FastMCP streamable-HTTP app at ``/kits/mcp``, and
+    applies :class:`~app.auth.JWTAuthMiddleware` last so it wraps every
+    route.
+
+    :returns: Fully assembled FastAPI application.
+    """
+    mcp_app = mcp.http_app(path="/mcp")
+    # Swagger docs are enabled so the vendor media-type contract is
+    # discoverable. They sit behind the auth + User-Agent middleware like
+    # the rest of the app (not in the public-path allowlist).
+    application = FastAPI(
+        title="Quartermaster MCP",
+        docs_url="/docs",
+        redoc_url=None,
+        openapi_url="/openapi.json",
+        lifespan=mcp_app.lifespan,
+    )
+
+    application.add_api_route("/health", health, methods=["GET"])
+    application.add_api_route(
+        "/.well-known/oauth-protected-resource",
+        oauth_protected_resource_metadata,
+        methods=["GET"],
+    )
+    application.add_api_route(
+        "/.well-known/oauth-protected-resource/{path:path}",
+        oauth_protected_resource_metadata_path,
+        methods=["GET"],
+    )
+    application.add_api_route(
+        "/.well-known/oauth-authorization-server",
+        oauth_authorization_server_metadata,
+        methods=["GET"],
+    )
+
+    # /api admin + integration + client-registration routers (protected
+    # by the JWT + User-Agent middleware).
+    application.include_router(kits_admin.router)
+    application.include_router(integration.router)
+    application.include_router(clients.router)
+    application.include_router(app_tokens.router)
+
+    # Dev-only auth bypass: the token-minting router is imported and mounted
+    # ONLY when explicitly enabled, so /auth/dev/* is a plain 404 in
+    # production. Read from the environment directly so app construction does
+    # not require a fully-validated Settings object.
+    if os.environ.get("DEV_AUTH_ENABLED", "").lower() in ("1", "true", "yes"):
+        from app.routers import auth_dev
+
+        application.include_router(auth_dev.router)
+        logger.warning(
+            "DEV AUTH ENABLED: /auth/dev/* mounted. Never set "
+            "DEV_AUTH_ENABLED in production."
+        )
+
+    _register_exception_handlers(application)
+
+    application.mount("/kits", mcp_app)
+
+    # WebDAV authoring endpoint over the kit catalog (Basic + app token,
+    # enforced by JWTAuthMiddleware). Writes land on kits_root and are
+    # visible to the MCP immediately (kit reads are uncached).
+    mount_dav(application)
+
+    # Serve the built SPA + /config.js (no-op when there is no build). The
+    # SPA fallback route is added last so it never shadows /api, /kits, the
+    # well-known docs, or Swagger.
+    mount_webui(application)
+
+    # Middleware order: add JWT first, then User-Agent. Starlette runs the
+    # last-added middleware outermost, so the User-Agent gate runs before
+    # auth — an unregistered REST client is rejected with a clear pointer to
+    # the registration route before any token work. The UA gate covers only
+    # /api (the MCP mount is exempt); /health and the well-known docs are
+    # exempt inside each middleware.
+    application.add_middleware(JWTAuthMiddleware)
+    application.add_middleware(UserAgentMiddleware)
+    return application
+
+
+app = create_app()
