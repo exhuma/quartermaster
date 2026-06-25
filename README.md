@@ -56,9 +56,11 @@ curl -s http://localhost:8000/health
 ```
 
 The MCP endpoint is then served (authenticated) at
-`http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull
-`ghcr.io/exhuma/quartermaster` instead of building. For a production
-deployment behind Traefik, see
+`http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull a
+**channel** (`:stable`, `:beta`, `:alpha`) or a pinned version from
+`ghcr.io/exhuma/quartermaster` instead of building — see
+[RELEASING.md](RELEASING.md) for the versioning and channel scheme. For a
+production deployment behind Traefik, see
 [Self-hosting with Docker + Traefik](#self-hosting-with-docker--traefik).
 
 ---
@@ -342,6 +344,111 @@ Add to `~/.config/claude/claude_desktop_config.json` (Linux) or
 > **Note** — HTTP MCP support in Claude Desktop is subject to the
 > version you are running.  Check the Claude Desktop release notes if
 > the server does not appear.
+
+#### opencode
+
+opencode can connect either via interactive **OAuth** (browser SSO with token
+refresh) or a **static bearer token** header. OAuth is nicer day-to-day; the
+header is simplest for headless/CI.
+
+##### Option A — OAuth (browser login)
+
+Quartermaster advertises a **public** OAuth client: `authorization_code` +
+PKCE (`S256`), no client secret, no Dynamic Client Registration. The Keycloak
+client **must be public** — a confidential client (one with a secret) passes
+the browser step but fails the token exchange with `invalid_client`.
+
+1. In Keycloak, configure the client as **public**: Client authentication
+   **OFF**, Standard flow **ON**, PKCE method **`S256`**.
+2. Register opencode's OAuth callback in that client's **Valid redirect URIs**.
+   opencode's default callback is `http://127.0.0.1:19876/mcp/oauth/callback`.
+3. Add the server, answering **No** to "Do you have a client secret?", then
+   authenticate:
+
+   ```bash
+   opencode mcp add      # type: remote
+                         # url:  https://quartermaster.example.com/kits/mcp
+                         # OAuth: yes; client id: <public-client-id>; secret: no
+   opencode mcp auth quartermaster
+   ```
+
+   Open the printed URL (or let it launch a browser), approve, and opencode
+   stores + refreshes the token. Verify with `opencode mcp debug quartermaster`.
+
+**Customizing the redirect URI/port.** If `19876` is taken, or you tunnel a
+specific port and want to pre-register it, set `redirectUri` under the
+server's `oauth` config (recent opencode builds support this), then register
+**that exact URI** in Keycloak:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "quartermaster": {
+      "type": "remote",
+      "url": "https://quartermaster.example.com/kits/mcp",
+      "oauth": {
+        "clientId": "<public-client-id>",
+        "redirectUri": "http://127.0.0.1:3118/mcp/oauth/callback"
+      }
+    }
+  }
+}
+```
+
+opencode binds its callback listener to the host/port/path of `redirectUri`
+and sends the same value as `redirect_uri`. If your opencode build predates
+this option, register (or tunnel) the default `…:19876/…` URI instead.
+
+##### Option B — static bearer token (no browser)
+
+Disable OAuth and supply a Keycloak service-account token via a header
+(opencode interpolates `{env:VAR}` at startup):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "quartermaster": {
+      "type": "remote",
+      "url": "https://quartermaster.example.com/kits/mcp",
+      "enabled": true,
+      "oauth": false,
+      "headers": {
+        "Authorization": "Bearer {env:QUARTERMASTER_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Mint the token with the `client_credentials` flow (see
+[Obtaining a token](#obtaining-a-token)) and export it before launching
+opencode:
+
+```bash
+export QUARTERMASTER_TOKEN=$(
+  curl -s -X POST \
+    "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+    -d grant_type=client_credentials \
+    -d client_id="${KC_CLIENT_ID}" \
+    -d client_secret="${KC_CLIENT_SECRET}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+)
+```
+
+The header is read at startup, so the token must outlast your session —
+extend the service-account **Access Token Lifespan** in Keycloak (e.g. to
+24h), and re-export + restart opencode when it expires.
+
+> **Troubleshooting.** If the browser shows "Authentication Successful" but
+> opencode reports "OAuth completion failed", the token exchange failed —
+> almost always because the Keycloak client is **confidential**; switch it to
+> public (above). If Keycloak shows the token *was* issued and opencode still
+> fails, you may have hit a known opencode bug ([#17822][oc-issue]); update
+> opencode or use Option B.
+
+[oc-issue]: https://github.com/anomalyco/opencode/issues/17822
 
 ### Self-hosting with Docker + Traefik
 

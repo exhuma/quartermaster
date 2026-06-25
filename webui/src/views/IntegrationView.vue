@@ -28,6 +28,28 @@ const claudeSnippet = computed(
 # Authenticate via the browser OAuth flow when prompted.`,
 )
 
+const opencodeSnippet = computed(
+  () => `// ~/.config/opencode/opencode.jsonc
+{
+  "mcp": {
+    "instructions": {
+      "type": "remote",
+      "url": "${mcpUrl.value}",
+      "oauth": { "clientId": "<public-keycloak-client-id>" }
+    }
+  }
+}
+// Use a PUBLIC Keycloak client (NO secret): Client authentication OFF,
+// Standard flow ON, PKCE S256. A confidential client fails the token
+// exchange with invalid_client.
+// Register opencode's callback as a Valid redirect URI:
+//   http://127.0.0.1:19876/mcp/oauth/callback
+// Then authenticate:  opencode mcp auth instructions
+// Need a different port? add e.g.
+//   "redirectUri": "http://127.0.0.1:3118/mcp/oauth/callback"
+// to the "oauth" block and register that exact URI instead.`,
+)
+
 const copilotSnippet = computed(
   () => `# Send fixed headers instead of a bearer token:
 X-Client-Id: <your-keycloak-client-id>
@@ -105,6 +127,7 @@ async function submitRegister(): Promise<void> {
         <v-tabs v-model="tab" color="primary">
           <v-tab value="vscode">VS Code</v-tab>
           <v-tab value="claude">Claude Code</v-tab>
+          <v-tab value="opencode">opencode</v-tab>
           <v-tab v-if="info.copilot_auth_enabled" value="copilot">
             Copilot
           </v-tab>
@@ -117,6 +140,9 @@ async function submitRegister(): Promise<void> {
             </v-tabs-window-item>
             <v-tabs-window-item value="claude">
               <pre class="snippet">{{ claudeSnippet }}</pre>
+            </v-tabs-window-item>
+            <v-tabs-window-item value="opencode">
+              <pre class="snippet">{{ opencodeSnippet }}</pre>
             </v-tabs-window-item>
             <v-tabs-window-item value="copilot">
               <pre class="snippet">{{ copilotSnippet }}</pre>

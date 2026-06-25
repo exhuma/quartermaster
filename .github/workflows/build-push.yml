@@ -1,5 +1,10 @@
 name: Build & Push MCP server image
 
+# Releases are CalVer-tag-driven and follow cascading channel pointers
+# (module-calver-release-channels): pushing a tag vYYYY.M.D[-alpha.N|-beta.N|
+# -rc.N] publishes the immutable full version plus the moving channel tags it
+# advances (alpha ⊂ beta ⊂ stable). No unconditional `latest` is produced.
+# Branch pushes to main run tests and validate the build, but publish nothing.
 on:
   push:
     branches:
@@ -9,8 +14,7 @@ on:
 
 env:
   # Publishes to GitHub Container Registry under this repository's namespace,
-  # e.g. ghcr.io/<owner>/quartermaster. After the first publish, set the
-  # package visibility to Public in the repo's package settings.
+  # e.g. ghcr.io/<owner>/quartermaster.
   IMAGE: ghcr.io/${{ github.repository_owner }}/quartermaster
 
 jobs:
@@ -32,6 +36,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Derive the moving channel pointers this release advances (cascade by
+      # maturity: stable ⊃ beta ⊃ alpha). Tag pushes only — branch builds
+      # publish nothing, so they need no channels.
+      - name: Derive release channels
+        id: channels
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          channels="$(sh scripts/derive_channels.sh)"
+          echo "channels=$channels" >> "$GITHUB_OUTPUT"
+          # Render one `type=raw,value=<channel>` line per channel for the
+          # docker/metadata-action `tags:` input below.
+          {
+            echo "raw_tags<<EOF"
+            for c in $channels; do echo "type=raw,value=$c"; done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -47,21 +68,24 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.IMAGE }}
+          # CalVer has no semver ordering to anchor `latest` — never publish an
+          # unconditional `latest`. Channels are the moving pointers instead.
+          flavor: |
+            latest=false
           tags: |
-            # Tag every main push with :latest
-            type=raw,value=latest,enable={{is_default_branch}}
-            # Strip the leading 'v' from CalVer git tags
-            # Works with any number of components (e.g. v2026.3.25.1 → 2026.3.25.1)
-            type=match,pattern=v(.*),group=1
-            # Always add a short-SHA tag for traceability
-            type=sha,prefix=sha-,format=short
+            # The immutable full version, from the pushed tag (no-op on main).
+            type=semver,pattern={{version}}
+            # One moving channel pointer per derived channel (tag pushes only).
+            ${{ steps.channels.outputs.raw_tags }}
 
       - name: Build and push image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: server/Dockerfile
-          push: true
+          # Publish only when releasing (a tag push); branch builds validate
+          # the image but push nothing to the registry.
+          push: ${{ startsWith(github.ref, 'refs/tags/') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Layer caching via the registry itself — no external cache service needed
