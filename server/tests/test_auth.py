@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ssl
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -10,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth import IDPUnavailableError, JWTAuthMiddleware
+from app.auth import IDPUnavailableError, JWTAuthMiddleware, _build_ssl_context
 from app.config import Settings
 
 
@@ -30,6 +32,8 @@ def _settings(
         ),
         keycloak_issuer="https://auth.example.com/realms/master",
         keycloak_audience=None,
+        tls_ca_bundle=None,
+        tls_insecure_skip_verify=False,
         copilot_auth_enabled=copilot_auth_enabled,
         copilot_auth_timeout_seconds=3.0,
         token_endpoint=(
@@ -234,3 +238,84 @@ def test_settings_allow_custom_copilot_auth_timeout() -> None:
         copilot_auth_timeout_seconds=1.25,
     )
     assert settings.copilot_auth_timeout_seconds == 1.25
+
+
+def _self_signed_ca_pem() -> str:
+    """Generate a throwaway self-signed CA certificate as PEM text."""
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=3650))
+        .add_extension(
+            x509.BasicConstraints(ca=True, path_length=None), critical=True
+        )
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+def _tls_settings(**overrides: object) -> Settings:
+    """Build Settings for TLS-context tests (kits_root comes from env)."""
+    base: dict[str, object] = {
+        "keycloak_url": "https://auth.example.com",
+        "keycloak_realm": "master",
+        "resource_base_url": "https://instructions.example.com",
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_ssl_context_default_is_none() -> None:
+    """No TLS options set → callers use the default trust store."""
+    assert _build_ssl_context(_tls_settings()) is None
+
+
+def test_ssl_context_insecure_disables_verification() -> None:
+    """Insecure flag → a context that checks neither cert nor hostname."""
+    context = _build_ssl_context(_tls_settings(tls_insecure_skip_verify=True))
+    assert context is not None
+    assert context.check_hostname is False
+    assert context.verify_mode == ssl.CERT_NONE
+
+
+def test_ssl_context_insecure_takes_precedence_over_ca_bundle() -> None:
+    """Insecure wins even when a CA bundle is also configured."""
+    context = _build_ssl_context(
+        _tls_settings(
+            tls_insecure_skip_verify=True,
+            tls_ca_bundle="/nonexistent/ca.pem",
+        )
+    )
+    assert context is not None
+    assert context.verify_mode == ssl.CERT_NONE
+
+
+def test_ssl_context_ca_bundle_is_loaded(tmp_path: Path) -> None:
+    """A CA bundle path → a verifying context built from that bundle."""
+    ca_pem = tmp_path / "ca.pem"
+    ca_pem.write_text(_self_signed_ca_pem(), encoding="utf-8")
+    context = _build_ssl_context(_tls_settings(tls_ca_bundle=str(ca_pem)))
+    assert context is not None
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    # The bundle's certificate is loaded into the trust store.
+    assert context.get_ca_certs()
+
+
+def test_ssl_context_missing_ca_bundle_raises() -> None:
+    """A nonexistent CA bundle fails loudly rather than silently."""
+    with pytest.raises((FileNotFoundError, ssl.SSLError, OSError)):
+        _build_ssl_context(_tls_settings(tls_ca_bundle="/nonexistent/ca.pem"))

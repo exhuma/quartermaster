@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +29,35 @@ from app.dev_auth import decode_dev_token
 from app.storage import app_tokens
 
 logger = logging.getLogger(__name__)
+
+
+def _build_ssl_context(settings: Settings) -> ssl.SSLContext | None:
+    """
+    Build the TLS context for outbound Keycloak calls (JWKS fetch and the
+    optional Copilot token-endpoint check).
+
+    Precedence:
+
+    - ``tls_insecure_skip_verify`` → a context that verifies neither the
+      certificate nor the hostname. **POC/testing only**; logs a warning.
+    - ``tls_ca_bundle`` → trust the given PEM CA bundle (e.g. a private CA).
+    - otherwise → ``None`` so callers use their default system trust store.
+
+    :param settings: Application settings.
+    :returns: An :class:`ssl.SSLContext`, or ``None`` for default behaviour.
+    """
+    if settings.tls_insecure_skip_verify:
+        logger.warning(
+            "TLS verification DISABLED for Keycloak calls "
+            "(TLS_INSECURE_SKIP_VERIFY=true). Never use this in production."
+        )
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+    if settings.tls_ca_bundle:
+        return ssl.create_default_context(cafile=str(settings.tls_ca_bundle))
+    return None
 
 
 def _select_token_validation_mode(token: str, settings: Settings) -> str:
@@ -137,11 +167,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             'Bearer realm="Instructions MCP", '
             f'resource_metadata="{self._settings.oauth_metadata_url}"'
         )
+        self._ssl_context = _build_ssl_context(self._settings)
         self._jwks_client = PyJWKClient(
             self._settings.jwks_url,
             cache_keys=True,
             cache_jwk_set=True,
             lifespan=3600,
+            ssl_context=self._ssl_context,
         )
         self._copilot_auth_enabled = self._settings.copilot_auth_enabled
 
@@ -391,6 +423,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             with urllib.request.urlopen(
                 req,
                 timeout=self._settings.copilot_auth_timeout_seconds,
+                context=self._ssl_context,
             ) as response:
                 return response.status == 200
         except urllib.error.HTTPError as exc:

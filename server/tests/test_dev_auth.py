@@ -40,6 +40,8 @@ def _settings(dev_secret: str | None = None, audience: str | None = None):
         ),
         keycloak_issuer="https://auth.example.com/realms/master",
         keycloak_audience=audience,
+        tls_ca_bundle=None,
+        tls_insecure_skip_verify=False,
         copilot_auth_enabled=False,
         copilot_auth_timeout_seconds=3.0,
         token_endpoint=(

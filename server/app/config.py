@@ -37,6 +37,15 @@ class Settings(BaseSettings):
         must contain this value.  Leave unset to skip audience validation
         (useful when service-account tokens do not carry an explicit
         audience).
+    :param tls_ca_bundle: Optional path to a PEM CA bundle used to verify
+        Keycloak's TLS certificate on outbound calls (JWKS fetch and the
+        optional Copilot token-endpoint check).  Set this when Keycloak is
+        served by a private/internal CA that is not in the system trust
+        store.  Ignored when ``tls_insecure_skip_verify`` is true.
+    :param tls_insecure_skip_verify: When true, disables TLS certificate
+        and hostname verification for outbound Keycloak calls.  **For quick
+        POC/testing only — never use in production.**  Takes precedence over
+        ``tls_ca_bundle``.
     :param kits_root: Path to the ``kits/`` directory where kit
         subdirectories live.  Required — the catalog is decoupled from
         this server and is never bundled with it. Point ``KITS_ROOT`` at
@@ -104,6 +113,8 @@ class Settings(BaseSettings):
     keycloak_url: str
     keycloak_realm: str
     keycloak_audience: str | None = None
+    tls_ca_bundle: Path | None = None
+    tls_insecure_skip_verify: bool = False
     kits_root: Path
     resource_base_url: str
     webui_keycloak_client_id: str = "quartermaster-webui"

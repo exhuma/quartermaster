@@ -3,6 +3,10 @@
 How to run the project locally: the FastAPI backend (MCP + REST API +
 WebDAV), the Vue web UI, and the test suites.
 
+> **Just want it running fast?** See [QUICKSTART.md](QUICKSTART.md) — server
+> + UI in a few minutes with no Keycloak. This document is the fuller
+> reference for day-to-day development.
+
 ## Prerequisites
 
 - **Python** with [`uv`](https://docs.astral.sh/uv/) (backend).
@@ -169,6 +173,26 @@ Without Keycloak you can still run the backend, the test suites, and the
 production build — but the interactive browser UI needs a working OIDC
 provider. To exercise the API directly without the UI, obtain a token via
 the `client_credentials` flow (see the README's "Obtaining a token").
+
+### Behind a port-forward or reverse proxy
+
+When the SPA is served by the backend (production-style), the server renders
+the OIDC **redirect URI** into `/config.js` from `RESOURCE_BASE_URL`
+(`<RESOURCE_BASE_URL>/auth/callback`), and that value overrides the browser's
+own origin. So if you reach the server at a different address than it listens
+on — e.g. a port-forward `50007:8000` or a reverse proxy — set
+`RESOURCE_BASE_URL` to the **externally-reachable** origin you open in the
+browser, not the in-container one:
+
+```bash
+# accessed via a 50007:8000 port-forward:
+RESOURCE_BASE_URL=http://localhost:50007
+```
+
+Then register `<RESOURCE_BASE_URL>/auth/callback` (and that origin under
+**Web origins**) in the Keycloak client. The same value also drives the OAuth
+metadata URLs, so it stays consistent for MCP clients. (This only affects the
+production-style/served-SPA mode; the Vite dev server uses its own origin.)
 
 ## WebDAV authoring endpoint (local)
 

@@ -29,14 +29,23 @@ Running it locally? See [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
 ## Quick start
 
+**Just want to try it locally, without Keycloak?** Follow
+**[QUICKSTART.md](QUICKSTART.md)** — server + web UI running in a few minutes
+using the built-in dev-auth bypass.
+
+### Run with Docker (production-style)
+
+This path uses real authentication, so it needs a Keycloak realm and a kit
+catalog to mount:
+
 ```bash
 # 1. Build the image (build context is the repository ROOT).
 docker build -f server/Dockerfile . -t quartermaster
 
 # 2. Run it, pointing KITS_ROOT at your own kit-catalog checkout.
 docker run --rm -p 8000:8000 \
-  -e KEYCLOAK_URL=https://auth.example.com \
-  -e KEYCLOAK_REALM=master \
+  -e KEYCLOAK_URL=https://your-keycloak.example.com \
+  -e KEYCLOAK_REALM=your-realm \
   -e RESOURCE_BASE_URL=http://localhost:8000 \
   -e KITS_ROOT=/data/kits \
   -v /path/to/your/kit-catalog:/data/kits \
@@ -47,8 +56,10 @@ curl -s http://localhost:8000/health
 ```
 
 The MCP endpoint is then served (authenticated) at
-`http://localhost:8000/kits/mcp`. For a production deployment behind
-Traefik, see [Self-hosting with Docker + Traefik](#self-hosting-with-docker--traefik).
+`http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull
+`ghcr.io/exhuma/quartermaster` instead of building. For a production
+deployment behind Traefik, see
+[Self-hosting with Docker + Traefik](#self-hosting-with-docker--traefik).
 
 ---
 
@@ -350,6 +361,14 @@ cp .env.example .env
 # Edit .env — fill in KEYCLOAK_URL, KEYCLOAK_REALM, RESOURCE_BASE_URL.
 # KITS_ROOT is set to /data/kits by docker-compose (the mounted catalog).
 ```
+
+> **Set `RESOURCE_BASE_URL` to the origin the browser/client actually
+> reaches** (your public domain, or a `host:port` if you front the server
+> with a port-forward or reverse proxy) — not the in-container port. The
+> server derives the web UI's OIDC redirect URI from it
+> (`<RESOURCE_BASE_URL>/auth/callback`) and renders it into `/config.js` at
+> runtime, so a mismatch breaks the browser login. Register that exact
+> redirect URI in your Keycloak client.
 
 #### Deploy
 
