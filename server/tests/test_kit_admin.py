@@ -365,6 +365,55 @@ def test_api_create_list_get_delete(client) -> None:
     assert client.get("/api/kits/module-test").status_code == 404
 
 
+def test_api_create_kit_sets_location_header(client) -> None:
+    resp = client.post("/api/kits", json=_create_payload())
+    assert resp.status_code == 201
+    assert resp.headers["Location"] == "/api/kits/module-test"
+
+
+def test_api_create_version_location_and_delete_204(client) -> None:
+    client.post("/api/kits", json=_create_payload())
+    resp = client.post(
+        "/api/kits/module-test/versions",
+        json={
+            "version": "v2",
+            "summary": "Second.",
+            "sections": [
+                {
+                    "file": "invariant.md",
+                    "title": "Invariants",
+                    "gloss": "g",
+                    "always_load": True,
+                    "body": "# v2\n",
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.headers["Location"] == "/api/kits/module-test/versions/v2"
+    deleted = client.delete("/api/kits/module-test/versions/v2")
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+
+
+def test_api_delete_section_returns_204(client) -> None:
+    client.post("/api/kits", json=_create_payload())
+    client.put(
+        "/api/kits/module-test/versions/v1/sections/extra",
+        json={
+            "title": "Extra",
+            "gloss": "g",
+            "always_load": False,
+            "body": "# Extra\n",
+        },
+    )
+    deleted = client.delete(
+        "/api/kits/module-test/versions/v1/sections/extra"
+    )
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+
+
 def test_api_create_conflict(client) -> None:
     client.post("/api/kits", json=_create_payload())
     assert client.post("/api/kits", json=_create_payload()).status_code == 409

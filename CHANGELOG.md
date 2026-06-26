@@ -19,8 +19,18 @@ project aims to follow semantic versioning.
   (module-observability-healthz) with a compact, security-minimized payload and
   503-on-fail. The existing `GET /health` remains as a liveness alias.
 
+### Changed
+
+- REST API: `POST` endpoints that create a resource now return a `Location`
+  header (kit/version creation, client registration, app-token minting).
+- The web UI now ships both a light and a dark Vuetify theme.
+
 ### Changed (breaking)
 
+- REST API: `DELETE /api/kits/{name}/versions/{version}` and
+  `DELETE .../sections/{section_id}` now return **204 No Content** with no body
+  (previously 200 with the updated list). Fetch the collection with `GET` if
+  you need the post-delete state. Both remain idempotent.
 - **All server environment variables are now prefixed with `QM_`** (e.g.
   `KEYCLOAK_URL` → `QM_KEYCLOAK_URL`, `KITS_ROOT` → `QM_KITS_ROOT`,
   `LOG_LEVEL` → `QM_LOG_LEVEL`). This namespaces Quartermaster's configuration

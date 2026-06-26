@@ -46,7 +46,9 @@ def _subject(request: Request) -> str:
 
 
 @router.post("/app-tokens", status_code=status.HTTP_201_CREATED)
-def mint_app_token(payload: AppTokenCreate, request: Request) -> dict[str, Any]:
+def mint_app_token(
+    payload: AppTokenCreate, request: Request, response: Response
+) -> dict[str, Any]:
     """
     Mint a WebDAV app token for the current user.
 
@@ -63,6 +65,7 @@ def mint_app_token(payload: AppTokenCreate, request: Request) -> dict[str, Any]:
     record, token = app_tokens.mint(
         get_settings().app_tokens_path, subject, payload.label
     )
+    response.headers["Location"] = f"/api/app-tokens/{record['id']}"
     return {**record, "token": token}
 
 

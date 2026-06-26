@@ -101,9 +101,9 @@ def list_kits() -> list[dict[str, Any]]:
 
 
 @router.post("/kits", status_code=status.HTTP_201_CREATED)
-def create_kit(payload: KitCreate) -> dict[str, Any]:
+def create_kit(payload: KitCreate, response: Response) -> dict[str, Any]:
     """Create a kit with its initial version."""
-    return svc.create_kit(
+    detail = svc.create_kit(
         name=payload.name,
         applicability=payload.applicability,
         summary=payload.summary,
@@ -111,6 +111,8 @@ def create_kit(payload: KitCreate) -> dict[str, Any]:
         changelog=payload.changelog,
         version=payload.version,
     )
+    response.headers["Location"] = f"/api/kits/{payload.name}"
+    return detail
 
 
 @router.get("/kits/{name}")
@@ -159,23 +161,30 @@ def list_versions(name: str) -> list[str]:
 @router.post(
     "/kits/{name}/versions", status_code=status.HTTP_201_CREATED
 )
-def create_version(name: str, payload: VersionCreate) -> list[str]:
+def create_version(
+    name: str, payload: VersionCreate, response: Response
+) -> list[str]:
     """Add a new major version to a kit."""
-    return svc.create_version(
+    versions = svc.create_version(
         name,
         payload.version,
         summary=payload.summary,
         sections=_inputs(payload.sections),
     )
+    response.headers["Location"] = (
+        f"/api/kits/{name}/versions/{payload.version}"
+    )
+    return versions
 
 
 @router.delete(
     "/kits/{name}/versions/{version}",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_204_NO_CONTENT,
 )
-def delete_version(name: str, version: str) -> list[str]:
-    """Delete one major version of a kit (idempotent)."""
-    return svc.delete_version(name, version)
+def delete_version(name: str, version: str) -> Response:
+    """Delete one major version of a kit (idempotent, 204 no body)."""
+    svc.delete_version(name, version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/kits/{name}/versions/{version}/outline")
@@ -218,13 +227,14 @@ def put_section(
 
 @router.delete(
     "/kits/{name}/versions/{version}/sections/{section_id}",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_section(
     name: str, version: str, section_id: str
-) -> list[str]:
-    """Delete a section from a version (idempotent)."""
-    return svc.delete_section(name, version, section_id)
+) -> Response:
+    """Delete a section from a version (idempotent, 204 no body)."""
+    svc.delete_section(name, version, section_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------

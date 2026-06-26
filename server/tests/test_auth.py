@@ -97,7 +97,7 @@ def test_fixed_headers_allow_access_when_enabled(
 ) -> None:
     """Ensure fixed headers are accepted when feature flag is enabled."""
 
-    def _valid(self: JWTAuthMiddleware, request: object) -> bool:
+    async def _valid(self: JWTAuthMiddleware, request: object) -> bool:
         del self, request
         return True
 
@@ -123,7 +123,7 @@ def test_fixed_headers_rejected_when_secret_is_invalid(
 ) -> None:
     """Ensure invalid fixed header secret is rejected."""
 
-    def _invalid(self: JWTAuthMiddleware, request: object) -> bool:
+    async def _invalid(self: JWTAuthMiddleware, request: object) -> bool:
         del self, request
         return False
 
@@ -204,7 +204,7 @@ def test_fixed_headers_return_503_when_idp_unavailable(
 ) -> None:
     """Ensure IDP outages are surfaced as 503 errors."""
 
-    def _unavailable(self: JWTAuthMiddleware, request: object) -> bool:
+    async def _unavailable(self: JWTAuthMiddleware, request: object) -> bool:
         del self, request
         raise IDPUnavailableError("idp down")
 

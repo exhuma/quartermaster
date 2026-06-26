@@ -33,7 +33,7 @@ onMounted(refresh)
       <v-progress-linear
         :active="isLoading"
         indeterminate
-        color="secondary"
+        color="primary"
         absolute
         location="bottom"
       />

@@ -52,8 +52,15 @@ docker run --rm -p 8000:8000 \
   quartermaster
 
 # 3. Check it is up.
-curl -s http://localhost:8000/health
+curl -s http://localhost:8000/livez
 ```
+
+Quartermaster exposes several health probes:
+
+- `GET /livez` — liveness (the process is up). `GET /health` is a
+  backward-compatible alias.
+- `GET /readyz` — readiness (the kit catalog is present and loadable).
+- `GET /healthz` — full health, including Keycloak reachability.
 
 The MCP endpoint is then served (authenticated) at
 `http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull a
@@ -495,6 +502,61 @@ The `docker-compose.yml` expects:
 
 For running the server **and the web UI** locally, see
 [`DEVELOPMENT.md`](DEVELOPMENT.md).
+
+### Configuration reference
+
+Every operator-settable input is an environment variable prefixed `QM_`.
+`server/.env.example` is a convenient annotated starting point you can copy
+to `.env`, but the table below is the authoritative reference.
+
+| Name | Required | Purpose | Default |
+|---|---|---|---|
+| `QM_KEYCLOAK_URL` | Yes | Base URL of Keycloak (no trailing slash). | — |
+| `QM_KEYCLOAK_REALM` | Yes | Realm that issues tokens. | — |
+| `QM_RESOURCE_BASE_URL` | Yes | Public origin (scheme + host) as reached by the browser; drives OAuth metadata and the SPA redirect URIs. | — |
+| `QM_KEYCLOAK_AUDIENCE` | No | Expected `aud` claim; unset skips audience validation. | unset (no audience check) |
+| `QM_KITS_ROOT` | No* | Kit catalog directory. Required at runtime (the catalog is external). | `/data/kits` (Docker image) |
+| `QM_CLIENT_REGISTRY_PATH` | No | Registered-client state file. | `/data/client_registry.json` (Docker image) |
+| `QM_APP_TOKENS_PATH` | No | Hashed WebDAV app-token store. | `/data/app_tokens.json` (Docker image) |
+| `QM_DAV_REQUIRE_TLS` | No | Refuse WebDAV Basic credentials over plain HTTP. | `true` |
+| `QM_WEBUI_DIST` | No | Built SPA directory; unset means the SPA is not served. | unset |
+| `QM_OAUTH_SCOPES` | No | Space-separated scopes advertised in OAuth metadata. | `openid profile email` |
+| `QM_TLS_CA_BUNDLE` | No | PEM CA bundle for outbound Keycloak TLS. | system trust store |
+| `QM_TLS_INSECURE_SKIP_VERIFY` | No | Disable Keycloak TLS verification (POC only — never in production). | `false` |
+| `QM_COPILOT_AUTH_ENABLED` | No | Accept fixed-header (`X-Client-Id`/`X-Client-Secret`) auth for clients that cannot present a bearer token. | `false` |
+| `QM_COPILOT_AUTH_TIMEOUT_SECONDS` | No | Token-endpoint timeout for fixed-header auth. | `3.0` |
+| `QM_GITHUB_OWNER` | No | GitHub owner for kit-gap issue materialization (all of owner/repo/token required to activate). | unset (feature off) |
+| `QM_GITHUB_REPO` | No | GitHub repository for kit-gap issue materialization. | unset (feature off) |
+| `QM_GITHUB_TOKEN` | No | GitHub token permitted to create issues in the configured repo. | unset (feature off) |
+| `QM_GITHUB_DEFAULT_ASSIGNEE` | No | Default assignee applied to created kit-gap issues. | unset |
+| `QM_DEV_AUTH_ENABLED` | No | **Dev only — never set in production.** Local auth bypass / token-minting routes. | `false` |
+| `QM_DEV_SHARED_SECRET` | No | **Dev only — never set in production.** HS256 signing secret for dev tokens. | unset (HS256 rejected) |
+| `QM_LOG_LEVEL` | No | Console log level when `QM_LOG_CONFIG` is unset. | `INFO` |
+| `QM_LOG_CONFIG` | No | Path to a TOML `dictConfig` file for full logging control. | unset (colored console) |
+
+\* `QM_KITS_ROOT` is optional only because the Docker image defaults it to
+`/data/kits`; the server needs a kit catalog at that path to serve anything.
+
+### Upgrading
+
+Quartermaster keeps no database and runs no migrations. All persistent state
+lives on the `/data` volume:
+
+- the kit catalog, if you mount it there;
+- `client_registry.json` (registered client User-Agents);
+- `app_tokens.json` (hashed WebDAV app tokens).
+
+To upgrade:
+
+1. **Back up the `/data` volume** first (a plain copy of the directory is
+   sufficient — it is just files).
+2. Pull the new image tag — a channel (`:stable`, `:beta`, `:alpha`) or a
+   pinned version — from `ghcr.io/exhuma/quartermaster`.
+3. Recreate the container against the same `/data` volume, preserving it
+   across the upgrade (do **not** delete or recreate the volume).
+
+There are no data migrations to run; the new container reads the existing
+state as-is.
 
 ---
 

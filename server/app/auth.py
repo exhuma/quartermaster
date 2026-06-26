@@ -12,11 +12,9 @@ import base64
 import binascii
 import logging
 import ssl
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Awaitable, Callable
 
+import httpx
 import jwt
 from jwt import PyJWKClient
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -263,7 +261,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             has_headers = self._has_copilot_auth_headers(request)
             if has_headers:
                 try:
-                    if self._validate_copilot_headers(request):
+                    if await self._validate_copilot_headers(request):
                         logger.debug(
                             "User authenticated via IDP-backed Copilot headers"
                         )
@@ -392,7 +390,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             and _COPILOT_CLIENT_SECRET_HEADER in request.headers
         )
 
-    def _validate_copilot_headers(self, request: Request) -> bool:
+    async def _validate_copilot_headers(self, request: Request) -> bool:
         """
         Validate Copilot credentials against the IDP token endpoint.
 
@@ -406,45 +404,33 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             logger.debug("Missing fixed-header client credentials")
             return False
 
-        body = urllib.parse.urlencode(
-            {
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            self._settings.token_endpoint,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        )
-
         try:
-            with urllib.request.urlopen(
-                req,
+            async with httpx.AsyncClient(
+                verify=self._ssl_context or True,
                 timeout=self._settings.copilot_auth_timeout_seconds,
-                context=self._ssl_context,
-            ) as response:
-                return response.status == 200
-        except urllib.error.HTTPError as exc:
-            if exc.code in {400, 401, 403}:
-                logger.info(
-                    "IDP rejected fixed-header credentials: status=%s",
-                    exc.code,
+            ) as client:
+                response = await client.post(
+                    self._settings.token_endpoint,
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                    },
                 )
-                return False
-            logger.warning("IDP returned error status=%s", exc.code)
-            raise IDPUnavailableError("IDP returned server error") from exc
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            OSError,
-        ) as exc:
+        except httpx.HTTPError as exc:
             logger.warning("IDP request failed: %s", exc)
             raise IDPUnavailableError("Unable to reach IDP") from exc
+
+        if response.status_code == 200:
+            return True
+        if response.status_code in {400, 401, 403}:
+            logger.info(
+                "IDP rejected fixed-header credentials: status=%s",
+                response.status_code,
+            )
+            return False
+        logger.warning("IDP returned error status=%s", response.status_code)
+        raise IDPUnavailableError("IDP returned server error")
 
     @staticmethod
     def _service_unavailable(detail: str) -> JSONResponse:

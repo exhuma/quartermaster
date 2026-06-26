@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
-from urllib import error, request
 from urllib.parse import urlencode
+
+import httpx
 
 from app.config import get_settings
 
@@ -119,39 +119,31 @@ def _github_api_request(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Perform a GitHub API request and parse the JSON response."""
-    data = None
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    req = request.Request(
-        url=url,
-        data=data,
-        method=method,
-        headers=headers,
-    )
 
     try:
-        with request.urlopen(req, timeout=10) as response:
-            response_body = response.read().decode("utf-8")
-            return json.loads(response_body)
-    except error.HTTPError as exc:
-        body_bytes = exc.read()
-        body_text = body_bytes.decode("utf-8", errors="replace").strip()
-        body_text = body_text or "<empty response body>"
+        response = httpx.request(
+            method,
+            url,
+            headers=headers,
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPStatusError as exc:
+        body_text = exc.response.text.strip() or "<empty response body>"
         raise ValueError(
             "GitHub API request failed with status "
-            f"{exc.code}: {body_text}"
+            f"{exc.response.status_code}: {body_text}"
         ) from exc
-    except error.URLError as exc:
-        reason = str(exc.reason)
+    except httpx.HTTPError as exc:
         raise ValueError(
-            f"GitHub API request failed due to network error: {reason}"
+            f"GitHub API request failed due to network error: {exc}"
         ) from exc
 
 

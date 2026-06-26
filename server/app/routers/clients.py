@@ -38,7 +38,7 @@ class ClientRegister(BaseModel):
 
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
 def register_client(
-    payload: ClientRegister, request: Request
+    payload: ClientRegister, request: Request, response: Response
 ) -> dict[str, Any]:
     """Register (or update) a client User-Agent (idempotent)."""
     client_host = request.client.host if request.client else "unknown"
@@ -48,11 +48,13 @@ def register_client(
         window_seconds=60,
         scope="client registration",
     )
-    return client_registry.register(
+    record = client_registry.register(
         get_settings().client_registry_path,
         payload.user_agent,
         payload.label,
     )
+    response.headers["Location"] = f"/api/clients/{record['id']}"
+    return record
 
 
 @router.get("/clients")
