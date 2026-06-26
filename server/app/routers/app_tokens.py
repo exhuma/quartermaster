@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.media_types import VendorJSONResponse, require_vendor_accept
+from app.rate_limit import enforce_limit_or_429
 from app.storage import app_tokens
 
 router = APIRouter(
@@ -52,8 +53,15 @@ def mint_app_token(payload: AppTokenCreate, request: Request) -> dict[str, Any]:
     The ``token`` field is the plaintext credential — shown once, never
     stored. Use it as the Basic password when mounting ``/dav``.
     """
+    subject = _subject(request)
+    enforce_limit_or_429(
+        key=f"mint-app-token:{subject}",
+        limit=10,
+        window_seconds=60,
+        scope="app-token minting",
+    )
     record, token = app_tokens.mint(
-        get_settings().app_tokens_path, _subject(request), payload.label
+        get_settings().app_tokens_path, subject, payload.label
     )
     return {**record, "token": token}
 

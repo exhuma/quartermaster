@@ -6,6 +6,19 @@ project aims to follow semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- Hardening HTTP middleware (module-http-middleware-hardening): a per-request
+  correlation ID (`X-Correlation-ID`, honoured inbound, echoed back, shared by
+  every log line via a contextvar), the three standard security headers, an
+  `X-Quartermaster-Version` response header, and one structured access-log line
+  per request.
+- Opt-in rate limiting on the client-registration and app-token-minting
+  endpoints (HTTP 429 with the full RFC 6585 header set).
+- Dedicated `GET /livez`, `GET /readyz`, and `GET /healthz` probes
+  (module-observability-healthz) with a compact, security-minimized payload and
+  503-on-fail. The existing `GET /health` remains as a liveness alias.
+
 ### Changed (breaking)
 
 - **All server environment variables are now prefixed with `QM_`** (e.g.

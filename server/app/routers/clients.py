@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.media_types import VendorJSONResponse, require_vendor_accept
+from app.rate_limit import enforce_limit_or_429
 from app.storage import client_registry
 
 router = APIRouter(
@@ -36,8 +37,17 @@ class ClientRegister(BaseModel):
 
 
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
-def register_client(payload: ClientRegister) -> dict[str, Any]:
+def register_client(
+    payload: ClientRegister, request: Request
+) -> dict[str, Any]:
     """Register (or update) a client User-Agent (idempotent)."""
+    client_host = request.client.host if request.client else "unknown"
+    enforce_limit_or_429(
+        key=f"register-client:{client_host}",
+        limit=20,
+        window_seconds=60,
+        scope="client registration",
+    )
     return client_registry.register(
         get_settings().client_registry_path,
         payload.user_agent,

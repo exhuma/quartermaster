@@ -23,11 +23,47 @@ import json
 import logging
 import os
 import tomllib
+from contextvars import ContextVar
 from logging.config import dictConfig
 
 from gouge.colourcli import Simple
 
 logger = logging.getLogger(__name__)
+
+# Per-request correlation ID (module-http-middleware-hardening). Propagated via
+# a contextvar — not a function parameter — so every log record emitted during
+# a request shares the same ID. The request-logging middleware sets it on the
+# way in and clears it on the way out (all code paths).
+_correlation_id: ContextVar[str | None] = ContextVar(
+    "correlation_id", default=None
+)
+
+
+def set_correlation_id(cid: str) -> None:
+    """Bind *cid* as the current request's correlation ID."""
+    _correlation_id.set(cid)
+
+
+def get_correlation_id() -> str | None:
+    """Return the current correlation ID, or ``None`` outside a request."""
+    return _correlation_id.get()
+
+
+def clear_correlation_id() -> None:
+    """Clear the correlation ID so it never leaks into the next request."""
+    _correlation_id.set(None)
+
+
+class CorrelationIdFilter(logging.Filter):
+    """Stamp every log record with the current correlation ID.
+
+    Attached to the root handlers so any record — from any logger active
+    during a request — carries ``correlation_id`` (``"-"`` when unset).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation_id = get_correlation_id() or "-"
+        return True
 
 
 class JsonLinesFormatter(logging.Formatter):
@@ -48,6 +84,7 @@ class JsonLinesFormatter(logging.Formatter):
             "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
             "level": record.levelname,
             "logger": record.name,
+            "cid": getattr(record, "correlation_id", "-"),
             "message": record.getMessage(),
         }
         if record.exc_info:
@@ -64,7 +101,15 @@ def _configure_default_logging() -> None:
     Simple.basicConfig(level=level)
     # basicConfig is a no-op once the root logger already has handlers (e.g. on
     # re-invocation), so set the level explicitly to honor LOG_LEVEL regardless.
-    logging.getLogger().setLevel(level)
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Stamp the correlation ID onto every record passing through the root
+    # handlers (idempotent — never add the filter twice).
+    for handler in root.handlers:
+        if not any(
+            isinstance(f, CorrelationIdFilter) for f in handler.filters
+        ):
+            handler.addFilter(CorrelationIdFilter())
     # Tame the very chatty SSE keep-alive logger; only meaningful for the
     # default config (a full dictConfig is respected verbatim).
     logging.getLogger("sse_starlette").setLevel(logging.INFO)

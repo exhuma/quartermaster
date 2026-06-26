@@ -89,6 +89,9 @@ def _select_token_validation_mode(token: str, settings: Settings) -> str:
 # Paths that are exempt from authentication.
 _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/health",
+    "/livez",
+    "/readyz",
+    "/healthz",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-authorization-server",
 })

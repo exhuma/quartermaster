@@ -33,6 +33,8 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 from app.logging_config import configure_logging
 
@@ -48,6 +50,7 @@ from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
+from app import health as health_probes
 from app.auth import JWTAuthMiddleware
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
@@ -69,6 +72,11 @@ from app.kits import (
     compare_kit_versions as _compare_kit_versions,
 )
 from app.mcp_logging import ToolCallAuditMiddleware
+from app.middleware import (
+    RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
+    VersionHeaderMiddleware,
+)
 from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.requests import (
@@ -680,7 +688,14 @@ def create_app() -> FastAPI:
         lifespan=mcp_app.lifespan,
     )
 
+    # Health probes (module-observability-healthz). /health is kept as a
+    # back-compat liveness alias for existing Docker/Traefik healthchecks.
     application.add_api_route("/health", health, methods=["GET"])
+    application.add_api_route("/livez", health_probes.livez, methods=["GET"])
+    application.add_api_route("/readyz", health_probes.readyz, methods=["GET"])
+    application.add_api_route(
+        "/healthz", health_probes.healthz, methods=["GET"]
+    )
     application.add_api_route(
         "/.well-known/oauth-protected-resource",
         oauth_protected_resource_metadata,
@@ -735,14 +750,26 @@ def create_app() -> FastAPI:
     # well-known docs, or Swagger.
     mount_webui(application)
 
-    # Middleware order: add JWT first, then User-Agent. Starlette runs the
-    # last-added middleware outermost, so the User-Agent gate runs before
-    # auth — an unregistered REST client is rejected with a clear pointer to
-    # the registration route before any token work. The UA gate covers only
-    # /api (the MCP mount is exempt); /health and the well-known docs are
-    # exempt inside each middleware.
+    # Middleware ORDER MATTERS: Starlette applies middleware LIFO, so the
+    # LAST add_middleware call sits OUTERMOST and runs first on the way in.
+    # Do not reorder (module-http-middleware-hardening). Outermost -> innermost:
+    #   RequestLogging   - sets the correlation ID first so every inner log
+    #                      record (incl. auth) shares it; logs every response.
+    #   VersionHeader    - stamps X-Quartermaster-Version.
+    #   SecurityHeaders  - sets the 3 security headers; sits outside auth so
+    #                      even 401/403 responses carry them.
+    #   UserAgent        - rejects unregistered non-browser clients before any
+    #                      token work (clear pointer to the registration route).
+    #   JWTAuth          - validates the bearer token (innermost).
+    try:
+        app_version = _pkg_version("quartermaster")
+    except PackageNotFoundError:  # pragma: no cover - always installed
+        app_version = "0.0.0"
     application.add_middleware(JWTAuthMiddleware)
     application.add_middleware(UserAgentMiddleware)
+    application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(VersionHeaderMiddleware, version=app_version)
+    application.add_middleware(RequestLoggingMiddleware)
     return application
 
 
