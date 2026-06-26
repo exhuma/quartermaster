@@ -8,6 +8,7 @@ flow are exercised end to end.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,32 @@ def test_dav_propfind_lists_collection(dav) -> None:
     )
     assert resp.status_code == 207  # Multi-Status
     assert "invariant.md" in resp.text
+
+
+def test_dav_propfind_hrefs_carry_mount_prefix(dav) -> None:
+    """
+    PROPFIND hrefs must be prefixed with the ``/dav`` mount path.
+
+    wsgidav is mounted under ``/dav`` by FastAPI; without ``mount_path`` it
+    emits root-relative hrefs (``/module-x/...``) that clients such as
+    davfs2 discard as outside the requested collection, so existing kits
+    never show up in ``ls`` even though writes succeed. Regression guard.
+    """
+    client, token, _kits = dav
+    resp = client.request(
+        "PROPFIND",
+        "/dav/module-x/v1/instructions/",
+        headers={"Depth": "1"},
+        auth=("alice", token),
+    )
+    assert resp.status_code == 207
+    hrefs = re.findall(r"<[^>]*href>([^<]*)</[^>]*href>", resp.text, re.I)
+    assert hrefs, "PROPFIND returned no hrefs"
+    for href in hrefs:
+        assert href.startswith("/dav/"), f"href missing /dav prefix: {href}"
+    # The collection itself and its child are both present and prefixed.
+    assert "/dav/module-x/v1/instructions/" in hrefs
+    assert "/dav/module-x/v1/instructions/invariant.md" in hrefs
 
 
 def test_dav_requires_tls_when_configured(

@@ -53,16 +53,25 @@ def _kits_root() -> Path:
     return Path(root)
 
 
-def build_dav_asgi(kits_root: Path) -> WSGIMiddleware:
+def build_dav_asgi(
+    kits_root: Path, mount_path: str = DAV_MOUNT_PATH
+) -> WSGIMiddleware:
     """
     Build the WebDAV ASGI application over *kits_root*.
 
     :param kits_root: Directory to expose read/write over WebDAV.
+    :param mount_path: URL prefix the app is mounted under. wsgidav needs
+        this to emit correctly-prefixed ``href``\\ s in ``PROPFIND``
+        responses; without it, directory listings carry root-relative
+        hrefs (``/<kit>/`` instead of ``/dav/<kit>/``) and clients such as
+        davfs2 discard the entries as outside the requested collection —
+        so existing kits never appear in ``ls`` even though writes succeed.
     :returns: An ASGI app (wsgidav wrapped by a2wsgi).
     """
     provider = FilesystemProvider(str(kits_root), readonly=False)
     config = {
         "provider_mapping": {"/": provider},
+        "mount_path": mount_path,
         # Anonymous: authentication is enforced upstream in the FastAPI
         # middleware (Basic username:app-token on /dav).
         "simple_dc": {"user_mapping": {"*": True}},
