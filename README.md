@@ -523,7 +523,9 @@ The `docker-compose.yml` expects:
   marks the line).
 
 For running the server **and the web UI** locally, see
-[`DEVELOPMENT.md`](DEVELOPMENT.md).
+[`DEVELOPMENT.md`](DEVELOPMENT.md). For running the container in production —
+mounts, volumes, and a staged rollout of the `resolve_kits` inference (local
+embeddings first, then an external LLM) — see [`OPERATIONS.md`](OPERATIONS.md).
 
 ### Configuration reference
 
@@ -551,6 +553,16 @@ to `.env`, but the table below is the authoritative reference.
 | `QM_GITHUB_REPO` | No | GitHub repository for kit-gap issue materialization. | unset (feature off) |
 | `QM_GITHUB_TOKEN` | No | GitHub token permitted to create issues in the configured repo. | unset (feature off) |
 | `QM_GITHUB_DEFAULT_ASSIGNEE` | No | Default assignee applied to created kit-gap issues. | unset |
+| `QM_EMBEDDINGS_ENABLED` | No | Use local embeddings for `resolve_kits` trait/section inference. When off (or the dependency is absent) the server degrades to the deterministic lexical floor. | `true` |
+| `QM_EMBEDDINGS_MODEL` | No | Embedding model id loaded by `fastembed`. | `BAAI/bge-small-en-v1.5` |
+| `QM_EMBEDDINGS_CACHE_DIR` | No | Directory for model files + cached trait/section embeddings; put it on a writable volume to persist across restarts. | `/data/embeddings` (Docker image) |
+| `QM_EMBEDDINGS_MIN_SCORE` | No | Minimum cosine similarity for an embedded trait/section to count. | `0.30` |
+| `QM_EMBEDDINGS_TOP_K_PER_CATEGORY` | No | Max traits the embedding engine emits per category. | `4` |
+| `QM_LLM_PROVIDER` | No | Optional LLM for `resolve_kits` trait inference: `openai` (OpenAI-compatible endpoint) or `anthropic`. Unset disables the LLM layer (embeddings/lexical still work). | unset (feature off) |
+| `QM_LLM_BASE_URL` | No | Base URL for the OpenAI-compatible endpoint (Ollama/vLLM/llama.cpp/cloud). Required for `openai`. | unset |
+| `QM_LLM_MODEL` | No | Model id passed to the configured LLM backend. Required when a provider is set. | unset |
+| `QM_LLM_API_KEY` | No | API key/token for the LLM backend. Required for `anthropic`; optional for local `openai` servers. | unset |
+| `QM_LLM_TIMEOUT_SECONDS` | No | Per-request LLM timeout; on timeout the resolver falls back to embeddings, then lexical. | `8.0` |
 | `QM_DEV_AUTH_ENABLED` | No | **Dev only — never set in production.** Local auth bypass / token-minting routes. | `false` |
 | `QM_DEV_SHARED_SECRET` | No | **Dev only — never set in production.** HS256 signing secret for dev tokens. | unset (HS256 rejected) |
 | `QM_LOG_LEVEL` | No | Console log level when `QM_LOG_CONFIG` is unset. | `INFO` |

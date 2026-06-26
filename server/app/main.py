@@ -8,7 +8,7 @@ Outer FastAPI application that:
   VS Code can discover the Keycloak authorization server automatically.
 - Mounts a FastMCP streamable-HTTP endpoint at ``/kits/mcp`` with V2
     discovery + content tools: ``list_kits``, ``list_available_traits``,
-    ``list_prompts``, ``get_prompt``, ``select_kits``,
+    ``list_prompts``, ``get_prompt``, ``select_kits``, ``resolve_kits``,
     ``explain_kit_candidate``, ``get_kit``, ``list_kit_versions``,
     and ``compare_kit_versions``.  The GitHub-backed gap tools
     ``check_existing_gap_issue`` / ``request_clarification_or_addition``
@@ -83,6 +83,7 @@ from app.requests import (
     check_existing_kit_extension_issue as _check_existing_kit_extension_issue,
 )
 from app.requests import request_kit_extension as _request_kit_extension
+from app.resolver import resolve_kits as _resolve_kits
 from app.routers import app_tokens, clients, integration, kits_admin
 from app.storage.kit_writes import KitPathError
 from app.user_agent import UserAgentMiddleware
@@ -126,6 +127,13 @@ For each new task:
    (omit `sections`) only when you're implementing all of it. For tasks that
    touch several kits, load each kit's content when you reach that aspect, not
    all up front.
+
+To save context, you can skip the manual loop above: call `resolve_kits` with
+a free-text task description and the server infers the traits, ranks the kits,
+and returns the recommendation with each kit's `always_load` sections already
+inlined (other relevant section ids come back under `fetch_on_demand` for
+`get_kit`). Fall back to the explicit loop when you have already mapped the
+task to traits or need finer control.
 
 For a compact, operational version of this trait-selection routine, fetch the
 bootstrap prompt from the prompt registry (`list_prompts` → `get_prompt`).
@@ -348,6 +356,47 @@ def select_kits(
         contexts=contexts,
         broaden=broaden,
         limit=limit,
+    )
+
+
+@mcp.tool
+def resolve_kits(
+    task: str,
+    broaden: bool = False,
+    limit: int = 8,
+    max_sections_per_kit: int = 8,
+) -> dict:
+    """
+    Resolve a free-text task to ranked kits with core content inlined.
+
+    This is the one-shot fast path: instead of running the discovery loop
+    (``list_available_traits`` → ``select_kits`` → ``explain_kit_candidate``
+    → ``get_kit_outline`` → ``get_kit``) yourself, describe the task and the
+    server infers the traits, ranks kits, and returns the recommendation
+    with each kit's ``always_load`` sections already inlined. Other relevant
+    section ids are returned under ``fetch_on_demand`` to pull later via
+    ``get_kit(name, sections=[…])``.
+
+    Trait inference is deterministic by default (local embeddings with a
+    lexical floor) and uses a configured LLM when available; the ``engine``
+    field reports which produced the result. Use ``select_kits`` directly
+    when you have already mapped the task to explicit traits.
+
+    :param task: Natural-language description of the work to be done.
+    :param broaden: Lower the selection threshold to widen recall.
+    :param limit: Maximum number of candidate kits to return.
+    :param max_sections_per_kit: Cap on non-``always_load`` sections offered
+        per kit for on-demand fetching.
+    :returns: ``{engine, inferred_traits, confidence, coverage,
+        broadening_recommended, kits, warnings}``; each kit carries
+        ``sections``, ``always_load_markdown`` and ``fetch_on_demand``.
+    :raises ValueError: If *task* is empty.
+    """
+    return _resolve_kits(
+        task=task,
+        broaden=broaden,
+        limit=limit,
+        max_sections_per_kit=max_sections_per_kit,
     )
 
 
