@@ -230,9 +230,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     "Invalid token audience", self._www_authenticate
                 )
             except jwt.PyJWTError as exc:
+                # Log the detail, but never echo the raw exception text to the
+                # client (module-auth-oidc-python).
                 logger.warning("JWT validation failed: %s", exc)
                 return self._unauthorized(
-                    f"Invalid token: {exc}", self._www_authenticate
+                    "Invalid token", self._www_authenticate
                 )
             except Exception as exc:  # noqa: BLE001
                 # JWKS fetch failures (network errors, unexpected

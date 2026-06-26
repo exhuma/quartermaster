@@ -13,6 +13,12 @@ interface ImportMetaEnv {
   // Dev-only auth bypass opt-in (module-dev-auth-bypass). Effective only
   // together with the build-time `import.meta.env.DEV` flag.
   readonly VITE_DEV_AUTH?: string
+  // Build identity, baked at image-build time (module-github-link,
+  // module-release-metadata). All optional — each governed UI element is
+  // hidden when its variable is absent.
+  readonly VITE_GITHUB_REPO_URL?: string
+  readonly VITE_APP_COMMIT?: string
+  readonly VITE_APP_BUILD_TIME?: string
 }
 
 interface ImportMeta {

@@ -19,7 +19,13 @@ COPY webui/package.json webui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 # Build the static SPA. Runtime config is injected by the server at
-# /config.js, so the build is environment-agnostic.
+# /config.js, so the build is environment-agnostic — EXCEPT build identity
+# (repo link + commit + build time), which is necessarily baked at build time
+# (module-github-link, module-release-metadata). Vite picks up VITE_* ARGs
+# automatically; each is optional and its UI element is hidden when unset.
+ARG VITE_GITHUB_REPO_URL
+ARG VITE_APP_COMMIT
+ARG VITE_APP_BUILD_TIME
 COPY webui/ ./
 RUN npm run build
 

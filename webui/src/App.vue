@@ -4,6 +4,7 @@ import { onMounted } from 'vue'
 import { useAuth } from '@/composables/useAuth'
 import { useLoading } from '@/composables/useLoading'
 import { authError, retryAuthentication } from '@/auth/reauthGuard'
+import BuildMeta from '@/components/BuildMeta.vue'
 
 const { isAuthenticated, displayName, refresh, login, logout } = useAuth()
 const { isLoading } = useLoading()
@@ -28,6 +29,10 @@ onMounted(refresh)
       <v-btn v-else variant="text" prepend-icon="mdi-login" @click="login()">
         Sign in
       </v-btn>
+
+      <!-- Build identity (repo link + commit). Hidden when its build-time
+           env vars are unset; low-visibility so it does not distract. -->
+      <BuildMeta class="ml-2 build-meta-bar" />
 
       <!-- Page-level loading feedback anchored under the app bar. -->
       <v-progress-linear
@@ -59,3 +64,13 @@ onMounted(refresh)
     </v-dialog>
   </v-app>
 </template>
+
+<style scoped>
+/* Low-visibility build-identity strip; full opacity on hover. */
+.build-meta-bar {
+  opacity: 0.55;
+}
+.build-meta-bar:hover {
+  opacity: 1;
+}
+</style>

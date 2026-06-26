@@ -78,6 +78,12 @@ jobs:
             # One moving channel pointer per derived channel (tag pushes only).
             ${{ steps.channels.outputs.raw_tags }}
 
+      - name: Capture build time
+        id: build-time
+        # head_commit.timestamp is absent on tag pushes (the release trigger),
+        # so capture an ISO-8601 UTC timestamp here instead.
+        run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -88,6 +94,12 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Build identity baked into the SPA (module-github-link,
+          # module-release-metadata). The component slices the SHA to 7 chars.
+          build-args: |
+            VITE_GITHUB_REPO_URL=${{ github.server_url }}/${{ github.repository }}
+            VITE_APP_COMMIT=${{ github.sha }}
+            VITE_APP_BUILD_TIME=${{ steps.build-time.outputs.ts }}
           # Layer caching via the registry itself — no external cache service needed
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max

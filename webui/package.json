@@ -13,7 +13,7 @@
     "type-check": "vue-tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,vue}\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,vue}\" \"tests/**/*.ts\"",
-    "check:no-dev-auth": "if grep -rq 'auth/dev' dist; then echo 'FAIL: dev-auth code leaked into the production build' && exit 1; else echo 'ok: no dev-auth code in dist'; fi"
+    "check:no-dev-auth": "if grep -rqE 'auth/dev|VITE_DEV_AUTH' dist; then echo 'FAIL: dev-auth code leaked into the production build' && exit 1; else echo 'ok: no dev-auth code in dist'; fi"
   },
   "dependencies": {
     "oidc-client-ts": "^3.1.0",

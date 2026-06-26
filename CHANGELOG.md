@@ -18,6 +18,16 @@ project aims to follow semantic versioning.
 - Dedicated `GET /livez`, `GET /readyz`, and `GET /healthz` probes
   (module-observability-healthz) with a compact, security-minimized payload and
   503-on-fail. The existing `GET /health` remains as a liveness alias.
+- Web UI build-identity strip (`BuildMeta.vue`): a source-repository link
+  (module-github-link) and a commit chip + identicon (module-release-metadata),
+  fed by build-time `VITE_GITHUB_REPO_URL` / `VITE_APP_COMMIT` /
+  `VITE_APP_BUILD_TIME` ARGs wired through the Dockerfile, compose, and CI. Each
+  element is hidden when its variable is absent.
+
+### Security
+
+- The bearer-token 401 response no longer echoes the raw PyJWT exception text
+  to the client (it is logged instead) — module-auth-oidc-python.
 
 ### Changed
 

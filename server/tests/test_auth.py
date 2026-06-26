@@ -196,7 +196,8 @@ def test_bearer_takes_precedence_over_fixed_headers(
         },
     )
     assert response.status_code == 401
-    assert "Invalid token:" in response.json()["detail"]
+    # The raw pyjwt exception text must not leak to the client.
+    assert response.json()["detail"] == "Invalid token"
 
 
 def test_fixed_headers_return_503_when_idp_unavailable(
