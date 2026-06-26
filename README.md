@@ -118,6 +118,19 @@ The server ships this workflow as MCP-level `instructions`, so compliant
 clients surface it automatically on connect. Hard-coding kits is acceptable
 only when a project's relevant kits are genuinely stable.
 
+To nudge agents toward this in **your own** repositories, add one short line to
+that repo's `AGENTS.md` (or `CLAUDE.md`):
+
+```md
+When quartermaster is available, treat its published trait vocabulary and
+bootstrap guidance as the source of truth for kit discovery; normalize user
+intent to supported traits before selection and retry when coverage is low.
+```
+
+That single sentence is deliberately light-touch — it names concepts, not tool
+or endpoint names, so it survives Quartermaster's evolution. See
+[AGENTS_MD_GUIDANCE.md](AGENTS_MD_GUIDANCE.md) for a phrase-by-phrase rationale.
+
 ### Architecture
 
 ```
