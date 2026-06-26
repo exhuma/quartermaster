@@ -20,6 +20,20 @@ def test_instructions_describe_per_task_reflection() -> None:
         assert tool in MCP_INSTRUCTIONS
 
 
+def test_instructions_lead_with_one_shot_tool() -> None:
+    """`resolve_kits` is presented as the default, ahead of the manual loop.
+
+    Agents follow the first concrete instruction they are given; if the manual
+    loop comes first they never reach the one-shot tool (the real failure mode
+    we observed). The default path must be introduced before the fallback.
+    """
+    text = MCP_INSTRUCTIONS
+    assert "resolve_kits" in text
+    # The one-shot tool is introduced before the manual discovery tools.
+    assert text.index("resolve_kits") < text.index("list_available_traits")
+    assert text.index("resolve_kits") < text.index("select_kits")
+
+
 def test_instructions_carry_normalization_invariant() -> None:
     """The description holds the tiny trait-normalization invariant.
 

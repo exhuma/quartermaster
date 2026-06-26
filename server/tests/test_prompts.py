@@ -39,6 +39,14 @@ def test_trait_selection_bootstrap_prompt_is_quartermaster_usage() -> None:
     assert "broaden" in template
 
 
+def test_bootstrap_prompt_leads_with_resolve_kits() -> None:
+    """The bootstrap routine recommends the one-shot tool before the loop."""
+    template = get_canned_prompt("trait_selection_bootstrap")["prompt_template"]
+    assert "resolve_kits" in template
+    # Introduced ahead of the manual select_kits step.
+    assert template.index("resolve_kits") < template.index("select_kits")
+
+
 def test_get_canned_prompt_returns_prompt() -> None:
     prompt = get_canned_prompt("legacy_assessment")
     assert prompt["title"] == "Legacy Project Diagnostic"

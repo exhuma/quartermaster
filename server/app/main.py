@@ -106,7 +106,18 @@ traits a task touches often only emerge during the conversation: a request to
 kits into scope that were irrelevant before. A static list cannot react to
 that.
 
-For each new task:
+**Default path — start every task by calling `resolve_kits`.** Pass a
+plain-language description of the work (`resolve_kits(task="…")`). The server
+maps the task onto its trait vocabulary, ranks the matching kits, and returns
+the recommendation with each kit's `always_load` sections already inlined —
+collapsing the whole discovery sequence into one call and keeping it out of
+your context. Re-run it whenever the task's direction shifts and new traits
+come into scope. Pull any extra sections it lists under `fetch_on_demand` with
+`get_kit(name, sections=[…])` when you reach that aspect.
+
+Use the manual loop below only when you need finer control: you have already
+mapped the task to explicit traits, you want to inspect ranking diagnostics,
+or you are loading several kits incrementally.
 
 1. **Discover coverage** — call `list_available_traits` for the trait
    vocabulary (languages, frameworks, capabilities, contexts) and `list_kits`
@@ -115,7 +126,8 @@ For each new task:
    authoritative, so normalize the developer's wording onto supported
    `languages`/`frameworks`/`capabilities`/`contexts` instead of inventing
    trait names; infer which traits the task touches from the repository and
-   intent, and revisit as the direction firms up.
+   intent, and revisit as the direction firms up. (`resolve_kits` does this
+   step for you.)
 3. **Load matching guidance** — call `select_kits` with the task's traits (use
    `broaden=True` if `broadening_recommended` is set, and retry with adjacent
    supported traits when coverage stays low — before concluding no kit
@@ -127,13 +139,6 @@ For each new task:
    (omit `sections`) only when you're implementing all of it. For tasks that
    touch several kits, load each kit's content when you reach that aspect, not
    all up front.
-
-To save context, you can skip the manual loop above: call `resolve_kits` with
-a free-text task description and the server infers the traits, ranks the kits,
-and returns the recommendation with each kit's `always_load` sections already
-inlined (other relevant section ids come back under `fetch_on_demand` for
-`get_kit`). Fall back to the explicit loop when you have already mapped the
-task to traits or need finer control.
 
 For a compact, operational version of this trait-selection routine, fetch the
 bootstrap prompt from the prompt registry (`list_prompts` → `get_prompt`).
@@ -369,12 +374,13 @@ def resolve_kits(
     """
     Resolve a free-text task to ranked kits with core content inlined.
 
-    This is the one-shot fast path: instead of running the discovery loop
-    (``list_available_traits`` → ``select_kits`` → ``explain_kit_candidate``
-    → ``get_kit_outline`` → ``get_kit``) yourself, describe the task and the
-    server infers the traits, ranks kits, and returns the recommendation
-    with each kit's ``always_load`` sections already inlined. Other relevant
-    section ids are returned under ``fetch_on_demand`` to pull later via
+    **Start here for kit discovery.** This is the default, one-shot path:
+    instead of running the discovery loop (``list_available_traits`` →
+    ``select_kits`` → ``explain_kit_candidate`` → ``get_kit_outline`` →
+    ``get_kit``) yourself, describe the task and the server infers the
+    traits, ranks kits, and returns the recommendation with each kit's
+    ``always_load`` sections already inlined. Other relevant section ids are
+    returned under ``fetch_on_demand`` to pull later via
     ``get_kit(name, sections=[…])``.
 
     Trait inference is deterministic by default (local embeddings with a

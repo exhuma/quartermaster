@@ -14,23 +14,30 @@ _PROMPTS: list[dict[str, str]] = [
         ),
         "prompt_template": (
             "Use this routine when selecting Quartermaster kits for a task:\n"
-            "1. Treat Quartermaster's advertised trait vocabulary as "
+            "1. Default to the one-shot `resolve_kits` tool: pass a "
+            "plain-language task description and it maps the task to traits, "
+            "ranks kits, and returns the recommendation with each kit's "
+            "`always_load` sections inlined. Pull anything it lists under "
+            "`fetch_on_demand` with section-scoped `get_kit`. Use the manual "
+            "steps below only for finer control (traits already known, "
+            "ranking diagnostics, or incremental multi-kit loading).\n"
+            "2. Treat Quartermaster's advertised trait vocabulary as "
             "authoritative — only supported `languages`, `frameworks`, "
             "`capabilities`, and `contexts` match; invented trait names do "
-            "not.\n"
-            "2. Normalize the user's wording to that vocabulary before "
+            "not. (`resolve_kits` applies this for you.)\n"
+            "3. Normalize the user's wording to that vocabulary before "
             'selecting (e.g. "REST API" -> framework `fastapi` + capability '
             '`rest-api`; "k8s"/"deploy target" -> context `deploy`; '
             '"logging" -> `observability`/`correlation-id`; "audit" -> '
             "`security`).\n"
-            "3. Call `list_available_traits` whenever the request introduces "
+            "4. Call `list_available_traits` whenever the request introduces "
             "a new runtime, deployment, or capability concern you have not "
             "already mapped.\n"
-            "4. Call `select_kits` with the normalized traits.\n"
-            "5. If coverage is low or `broadening_recommended` is set, "
+            "5. Call `select_kits` with the normalized traits.\n"
+            "6. If coverage is low or `broadening_recommended` is set, "
             "broaden and retry with adjacent supported traits before "
             "concluding that no relevant kit exists.\n"
-            "6. Prefer prompt and outline discovery "
+            "7. Prefer prompt and outline discovery "
             "(`list_prompts`/`get_prompt`, `get_kit_outline`, "
             "section-scoped `get_kit`) over loading full kit content."
         ),
