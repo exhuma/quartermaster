@@ -87,9 +87,47 @@ or second call instead of a scattershot series of weak ones.
 
 ## Recommended `AGENTS.md` block
 
-Drop this into a Quartermaster-backed repository's `AGENTS.md` / `CLAUDE.md`:
+You have two options. **Prefer the minimal block** — it is light-touch and
+survives Quartermaster's evolution. Reach for the explicit version only when a
+team wants the steps spelled out in-repo.
 
-```markdown
+### Minimal (recommended)
+
+Add this single line to a Quartermaster-backed repository's `AGENTS.md` /
+`CLAUDE.md`:
+
+```md
+When quartermaster is available, treat its published trait vocabulary and
+bootstrap guidance as the source of truth for kit discovery; normalize user
+intent to supported traits before selection and retry when coverage is low.
+```
+
+That sentence is the whole contract. It names **concepts**, not tool, prompt,
+or endpoint names, so it stays correct even if Quartermaster renames tools or
+moves where bootstrap guidance is delivered. Why each phrase is there:
+
+- **"When quartermaster is available"** — conditional, so the repo stays usable
+  when the server is not connected; nothing here hard-depends on it.
+- **"published trait vocabulary … as the source of truth"** — use the traits
+  Quartermaster *publishes* (`list_available_traits`) instead of inventing
+  labels; made-up names like `auth` or `internal-service` will not match the
+  catalog's `requires`/`excludes` rules.
+- **"bootstrap guidance … as the source of truth"** — Quartermaster already
+  ships the discovery routine (its MCP `instructions` plus the
+  `trait_selection_bootstrap` prompt); the repo defers to it rather than
+  restating it, so the workflow can change server-side without editing the repo.
+- **"normalize user intent to supported traits before selection"** — translate
+  natural-language requests into catalog trait labels *before* calling
+  `select_kits`, not after.
+- **"retry when coverage is low"** — one weak query is not a dead end; re-map to
+  a better trait set (or `broaden=True`) and try again before declaring a gap.
+
+### Explicit (optional, spelled out)
+
+When a team prefers the steps in-repo, this expanded block says the same thing
+with the tool names made concrete:
+
+```md
 ## Selecting instruction kits from Quartermaster
 
 This project uses the Quartermaster MCP to load instruction kits **per task**,
@@ -111,20 +149,20 @@ capability:
    kits up front.
 ```
 
-### What each sentence is trying to achieve
+What each line of the explicit block is trying to achieve:
 
 - **"…load instruction kits per task, not as a fixed list."** Stops the agent
   pinning a stale kit list that loads too much or too little; traits often only
   emerge mid-conversation.
-- **Sentence 1 (source of truth).** Anchors every query to the advertised
+- **Step 1 (source of truth).** Anchors every query to the advertised
   vocabulary so the agent stops inventing traits like `internal-service`.
-- **Sentence 2 (normalize).** Converts the user's natural language into trait
+- **Step 2 (normalize).** Converts the user's natural language into trait
   values that can actually match, which is where most weak queries are lost.
-- **Sentence 3 (broaden and retry).** Turns a low-coverage result into a second
+- **Step 3 (broaden and retry).** Turns a low-coverage result into a second
   attempt rather than a premature "no kit applies".
-- **Sentence 4 (fetch the prompt).** Keeps the authoritative routine in
+- **Step 4 (fetch the prompt).** Keeps the authoritative routine in
   Quartermaster — one source, free to evolve — instead of a copy that rots in
   every repo. It also references the registry generically, not a single
   hard-coded prompt name.
-- **Sentence 5 (outline first).** Defers the largest token cost until the agent
+- **Step 5 (outline first).** Defers the largest token cost until the agent
   is implementing that specific kit.

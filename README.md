@@ -124,9 +124,20 @@ vocabulary, so a relevant kit scores poorly and the agent wrongly concludes
 nothing applies. Two server-side surfaces steer agents past this at minimal
 token cost: a one-line normalization invariant baked into the MCP
 `instructions`, and an evolvable **`trait_selection_bootstrap`** prompt (fetch
-via `list_prompts` → `get_prompt`) holding the compact operational routine. For
-the recommended `AGENTS.md` block to put in a Quartermaster-backed repo — and
-the rationale behind each line — see
+via `list_prompts` → `get_prompt`) holding the compact operational routine.
+
+To nudge agents toward this in **your own** repositories, add one short,
+light-touch line to that repo's `AGENTS.md` (or `CLAUDE.md`):
+
+```md
+When quartermaster is available, treat its published trait vocabulary and
+bootstrap guidance as the source of truth for kit discovery; normalize user
+intent to supported traits before selection and retry when coverage is low.
+```
+
+That sentence names concepts, not tool or endpoint names, so it survives
+Quartermaster's evolution. For the rationale behind each phrase — plus a more
+explicit step-by-step block and a normalization table — see
 [AGENTS_GUIDANCE.md](AGENTS_GUIDANCE.md).
 
 ### Architecture
