@@ -474,7 +474,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         logger.debug("Authentication failed: %s", detail)
         if www_authenticate:
             logger.debug("WWW-Authenticate: %s", www_authenticate)
-        headers = {"WWW-Authenticate": www_authenticate} if www_authenticate else {}
+        headers = (
+            {"WWW-Authenticate": www_authenticate}
+            if www_authenticate
+            else {}
+        )
         return JSONResponse(
             {"detail": detail}, status_code=401, headers=headers
         )

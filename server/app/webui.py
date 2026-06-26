@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.config import Settings, _WEBUI_DIST_DEFAULT, get_settings
+from app.config import _WEBUI_DIST_DEFAULT, Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def _dist_dir() -> Path:
 
     :returns: The configured (or default) ``webui_dist`` path.
     """
-    return Path(os.environ.get("WEBUI_DIST", str(_WEBUI_DIST_DEFAULT)))
+    return Path(os.environ.get("QM_WEBUI_DIST", str(_WEBUI_DIST_DEFAULT)))
 
 
 def runtime_config(settings: Settings) -> dict[str, Any]:

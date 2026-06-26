@@ -25,7 +25,7 @@ describe('useKitEditor', () => {
     const e = useKitEditor()
     await e.getSection('module-a', 'v1', 'invariant')
     expect(mockApi.get).toHaveBeenCalledWith(
-      '/api/kits/module-a/versions/v1/sections/invariant',
+      '/api/kits/module-a/versions/v1/sections/invariant'
     )
     await e.saveSection('module-a', 'v1', 'invariant', {
       title: 'T',
@@ -43,7 +43,7 @@ describe('useKitEditor', () => {
     const e = useKitEditor()
     await e.getOutline('weird name', 'v1')
     expect(mockApi.get).toHaveBeenCalledWith(
-      '/api/kits/weird%20name/versions/v1/outline',
+      '/api/kits/weird%20name/versions/v1/outline'
     )
   })
 
@@ -52,7 +52,7 @@ describe('useKitEditor', () => {
     const e = useKitEditor()
     await e.compareVersions('module-a', 'v1.0.0', 'v2.0.0')
     expect(mockApi.get).toHaveBeenCalledWith(
-      '/api/kits/module-a/compare?from=v1.0.0&to=v2.0.0',
+      '/api/kits/module-a/compare?from=v1.0.0&to=v2.0.0'
     )
   })
 
@@ -62,7 +62,7 @@ describe('useKitEditor', () => {
     await e.loadTraits()
     await e.loadTraits()
     const traitCalls = mockApi.get.mock.calls.filter(
-      (c) => c[0] === '/api/traits',
+      (c) => c[0] === '/api/traits'
     )
     expect(traitCalls).toHaveLength(1)
   })
@@ -73,7 +73,7 @@ describe('useKitEditor', () => {
     await e.saveApplicability('module-a', { priority: 9 } as never)
     expect(mockApi.put).toHaveBeenCalledWith(
       '/api/kits/module-a/applicability',
-      { priority: 9 },
+      { priority: 9 }
     )
   })
 })

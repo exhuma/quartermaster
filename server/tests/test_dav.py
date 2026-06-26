@@ -35,7 +35,7 @@ def dav(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "DAV_REQUIRE_TLS": "false",
         "WEBUI_DIST": "/nonexistent",
     }.items():
-        monkeypatch.setenv(key, value)
+        monkeypatch.setenv(f"QM_{key}", value)
     get_settings.cache_clear()
 
     from app.main import create_app
@@ -135,7 +135,7 @@ def test_dav_requires_tls_when_configured(
         "DAV_REQUIRE_TLS": "true",
         "WEBUI_DIST": "/nonexistent",
     }.items():
-        monkeypatch.setenv(key, value)
+        monkeypatch.setenv(f"QM_{key}", value)
     get_settings.cache_clear()
     from app.main import create_app
 

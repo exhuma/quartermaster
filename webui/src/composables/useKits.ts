@@ -63,7 +63,7 @@ export function useKits() {
               body: `# ${name}\n\nDescribe the invariants here.\n`,
             },
           ],
-        }),
+        })
       )
       await fetchKits()
     } catch (err) {

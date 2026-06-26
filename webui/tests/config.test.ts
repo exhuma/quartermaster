@@ -48,7 +48,7 @@ describe('runtime config', () => {
     expect(cfg.requiredConfigErrors()).toContain('oidcAuthority')
     expect(cfg.requiredConfigErrors()).toContain('oidcClientId')
     expect(() => cfg.assertRequiredConfig()).toThrow(
-      /Missing required runtime config/,
+      /Missing required runtime config/
     )
   })
 })

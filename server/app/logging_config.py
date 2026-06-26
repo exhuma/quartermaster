@@ -4,13 +4,13 @@ Logging is configured from the environment at startup so operators can redirect
 logs (disk, logstash, syslog, custom HTTP endpoints) **without rebuilding the
 image**:
 
-- ``LOG_CONFIG`` — path to a TOML file holding a standard
+- ``QM_LOG_CONFIG`` — path to a TOML file holding a standard
   :func:`logging.config.dictConfig` schema (``version = 1``, ``formatters``,
   ``handlers``, ``loggers``, ``root``). When set, it takes full control of
   logging. Set ``disable_existing_loggers = false`` so the uvicorn/app loggers
   survive. Parsed with the stdlib :mod:`tomllib` (no extra dependency).
-- ``LOG_LEVEL`` — level for the default colored console output when no
-  ``LOG_CONFIG`` is supplied (default ``INFO``).
+- ``QM_LOG_LEVEL`` — level for the default colored console output when no
+  ``QM_LOG_CONFIG`` is supplied (default ``INFO``).
 
 The stdlib ships no JSON formatter, so :class:`JsonLinesFormatter` is provided
 here for operators who want one-JSON-object-per-line on disk; reference it from
@@ -57,7 +57,7 @@ class JsonLinesFormatter(logging.Formatter):
 
 def _configure_default_logging() -> None:
     """Apply the colored console fallback at ``LOG_LEVEL`` (default INFO)."""
-    level_name = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+    level_name = os.environ.get("QM_LOG_LEVEL", "INFO").strip().upper()
     level = getattr(logging, level_name, None)
     if not isinstance(level, int):
         level = logging.INFO
@@ -78,7 +78,7 @@ def configure_logging() -> None:
     ``LOG_CONFIG`` never aborts startup: the colored fallback is applied first
     so logs keep flowing, then the failure is logged.
     """
-    config_path = os.environ.get("LOG_CONFIG", "").strip()
+    config_path = os.environ.get("QM_LOG_CONFIG", "").strip()
     if not config_path:
         _configure_default_logging()
         return
@@ -90,7 +90,7 @@ def configure_logging() -> None:
     except (OSError, tomllib.TOMLDecodeError, ValueError) as exc:
         _configure_default_logging()
         logger.error(
-            "Failed to apply LOG_CONFIG=%s (%s); using default logging.",
+            "Failed to apply QM_LOG_CONFIG=%s (%s); using default logging.",
             config_path,
             exc,
         )

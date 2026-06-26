@@ -75,8 +75,6 @@ export function requiredConfigErrors(): string[] {
 export function assertRequiredConfig(): void {
   const missing = requiredConfigErrors()
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required runtime config: ${missing.join(', ')}`,
-    )
+    throw new Error(`Missing required runtime config: ${missing.join(', ')}`)
   }
 }

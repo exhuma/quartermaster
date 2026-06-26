@@ -19,7 +19,37 @@ dependencies = [
 dev = [
     "pytest>=8",
     "httpx>=0.28",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.ruff]
+# 80-character limit per the module-code-style-python / stack-fastapi-vuetify
+# kits. Enforced here so the rule is not merely aspirational.
+line-length = 80
+target-version = "py312"
+
+[tool.ruff.lint]
+# E (pycodestyle, incl. E501 line length), F (pyflakes), W (warnings),
+# I (import sorting), UP (pyupgrade). Do not blanket-suppress E501.
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# app/main.py deliberately calls configure_logging() before importing the
+# modules that grab loggers, so import-time records are formatted. That forces
+# those imports below the call — an intentional, documented exception to E402
+# (imports-not-at-top), not the line-length rule, which is never suppressed.
+"app/main.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+# The codebase is fully annotated; these checks keep it that way without
+# demanding strict mode across third-party-shaped boundaries.
+disallow_incomplete_defs = true
+check_untyped_defs = true

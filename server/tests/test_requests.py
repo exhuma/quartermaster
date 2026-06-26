@@ -63,7 +63,9 @@ def test_request_kit_extension_creates_github_issue(
     assert result["status"] == "created"
     assert result["request"]["discovered_traits"] == ["auth0"]
     assert result["request"]["missing_tools"] == ["suggest_new_module"]
-    assert result["request"]["details"] == "Please add OIDC-provider trait guidance."
+    assert result["request"]["details"] == (
+        "Please add OIDC-provider trait guidance."
+    )
     assert result["github_issue"]["number"] == 42
     assert (
         result["github_issue"]["url"]

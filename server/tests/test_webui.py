@@ -34,7 +34,7 @@ def test_render_config_js_shape() -> None:
 
 
 def test_no_build_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WEBUI_DIST", "/nonexistent/dist")
+    monkeypatch.setenv("QM_WEBUI_DIST", "/nonexistent/dist")
     app = FastAPI()
     webui.mount_webui(app)
     # No SPA routes were added.
@@ -48,7 +48,7 @@ def spa_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text("<!doctype html><title>app</title>")
     (dist / "assets" / "app.js").write_text("console.log('hi')")
-    monkeypatch.setenv("WEBUI_DIST", str(dist))
+    monkeypatch.setenv("QM_WEBUI_DIST", str(dist))
     monkeypatch.setattr(webui, "get_settings", _fake_settings)
     app = FastAPI()
 

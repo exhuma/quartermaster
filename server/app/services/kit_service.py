@@ -20,6 +20,7 @@ import json
 import shutil
 import tempfile
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,6 @@ from app.kits import (
     KitConflictError,
     KitNotFoundError,
     KitValidationError,
-    KitVersionNotFoundError,
 )
 from app.storage import kit_writes as writes
 
@@ -435,7 +435,9 @@ def delete_version(name: str, version: str) -> list[str]:
     return list_versions(name)
 
 
-def _rewrite_instructions(name: str, version: str, transform) -> None:
+def _rewrite_instructions(
+    name: str, version: str, transform: Callable[[Path], None]
+) -> None:
     """
     Apply *transform* to a staged copy of a version's instructions.
 

@@ -2,7 +2,7 @@
 # Build context is the repository ROOT — the releasable core is the server
 # plus the built web UI. The kit catalog is intentionally NOT copied in (it
 # is excluded by .dockerignore); supply it at runtime via a read/write
-# volume at /data/kits (the default KITS_ROOT). The image can therefore be
+# volume at /data/kits (the default QM_KITS_ROOT). The image can therefore be
 # published independently of any private kit content.
 #
 #   docker build -f server/Dockerfile . -t quartermaster
@@ -62,10 +62,10 @@ COPY --from=frontend /webui/dist /app/server/webui_dist
 # mount point and make /data writable by the non-root user so the WebDAV
 # authoring endpoint (later phase) and the client registry can write there.
 RUN mkdir -p /data/kits && chown -R appuser:appuser /data
-ENV KITS_ROOT=/data/kits
-ENV CLIENT_REGISTRY_PATH=/data/client_registry.json
-ENV APP_TOKENS_PATH=/data/app_tokens.json
-ENV WEBUI_DIST=/app/server/webui_dist
+ENV QM_KITS_ROOT=/data/kits
+ENV QM_CLIENT_REGISTRY_PATH=/data/client_registry.json
+ENV QM_APP_TOKENS_PATH=/data/app_tokens.json
+ENV QM_WEBUI_DIST=/app/server/webui_dist
 
 WORKDIR /app/server
 

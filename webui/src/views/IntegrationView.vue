@@ -20,12 +20,12 @@ const vscodeSnippet = computed(
   }
 }
 // VS Code discovers Keycloak via the server's OAuth well-known docs
-// and runs a browser PKCE sign-in automatically.`,
+// and runs a browser PKCE sign-in automatically.`
 )
 
 const claudeSnippet = computed(
   () => `claude mcp add --transport http instructions ${mcpUrl.value}
-# Authenticate via the browser OAuth flow when prompted.`,
+# Authenticate via the browser OAuth flow when prompted.`
 )
 
 const opencodeSnippet = computed(
@@ -47,20 +47,20 @@ const opencodeSnippet = computed(
 // Then authenticate:  opencode mcp auth instructions
 // Need a different port? add e.g.
 //   "redirectUri": "http://127.0.0.1:3118/mcp/oauth/callback"
-// to the "oauth" block and register that exact URI instead.`,
+// to the "oauth" block and register that exact URI instead.`
 )
 
 const copilotSnippet = computed(
   () => `# Send fixed headers instead of a bearer token:
 X-Client-Id: <your-keycloak-client-id>
 X-Client-Secret: <your-keycloak-client-secret>
-# Endpoint: ${mcpUrl.value}`,
+# Endpoint: ${mcpUrl.value}`
 )
 
 const genericSnippet = computed(
   () => `POST ${mcpUrl.value}
 Authorization: Bearer <access-token-from-keycloak>
-# Streamable-HTTP MCP transport.`,
+# Streamable-HTTP MCP transport.`
 )
 
 const regUserAgent = ref('')

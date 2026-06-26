@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-
 from urllib.parse import urlparse
 
 from pydantic import computed_field
@@ -106,8 +105,16 @@ class Settings(BaseSettings):
         to attach to created issues.
     """
 
+    # All environment variables are prefixed with the application name
+    # (``QM_``) per the module-fastapi kit, e.g. ``QM_KEYCLOAK_URL``. The few
+    # values read at import/bootstrap time outside this class (LOG_CONFIG,
+    # KITS_ROOT for the /dav mount, etc.) use the same ``QM_`` prefix
+    # explicitly.
     model_config = SettingsConfigDict(
-        case_sensitive=False, env_file=".env", env_file_encoding="utf-8"
+        env_prefix="QM_",
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
 
     keycloak_url: str

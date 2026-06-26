@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +72,7 @@ def mint(
         "user": user,
         "label": label,
         "token_hash": _hash(token),
-        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     records = _load(path)
     records.append(record)

@@ -26,7 +26,7 @@ WebDAV), the Vue web UI, and the test suites.
 
 The instruction-kit catalog — the **data** the server serves — lives in a
 **separate repository** and is never bundled with this server. The catalog
-is decoupled from the core: the server reads it from `KITS_ROOT`, which must
+is decoupled from the core: the server reads it from `QM_KITS_ROOT`, which must
 point at your kit-catalog checkout (dev) or the mounted volume (production).
 
 ## Backend (API + MCP)
@@ -40,17 +40,17 @@ uv run uvicorn app.main:app --reload
 
 The backend listens on <http://localhost:8000>.
 
-**Required settings** (in `server/.env`, or as env vars): `KEYCLOAK_URL`,
-`KEYCLOAK_REALM`, `RESOURCE_BASE_URL`, `KITS_ROOT`. For local use,
-`RESOURCE_BASE_URL` can be `http://localhost:8000`, and `KITS_ROOT` must
+**Required settings** (in `server/.env`, or as env vars): `QM_KEYCLOAK_URL`,
+`QM_KEYCLOAK_REALM`, `QM_RESOURCE_BASE_URL`, `QM_KITS_ROOT`. For local use,
+`QM_RESOURCE_BASE_URL` can be `http://localhost:8000`, and `QM_KITS_ROOT` must
 point at a local checkout of your kit catalog. Without a `.env` you can pass
 them inline:
 
 ```bash
-KEYCLOAK_URL=https://auth.example.com \
-KEYCLOAK_REALM=master \
-RESOURCE_BASE_URL=http://localhost:8000 \
-KITS_ROOT=/path/to/your/kit-catalog \
+QM_KEYCLOAK_URL=https://auth.example.com \
+QM_KEYCLOAK_REALM=master \
+QM_RESOURCE_BASE_URL=http://localhost:8000 \
+QM_KITS_ROOT=/path/to/your/kit-catalog \
 uv run uvicorn app.main:app --reload
 ```
 
@@ -68,7 +68,7 @@ cd server
 uv run pytest
 ```
 
-> The real-catalog tests resolve the catalog from `KITS_ROOT` and skip when
+> The real-catalog tests resolve the catalog from `QM_KITS_ROOT` and skip when
 > it is absent, so they pass even against an empty/decoupled checkout.
 
 ## Optional GitHub integration
@@ -77,7 +77,7 @@ The only part of the server that makes outbound calls to GitHub is the pair of
 gap-request MCP tools (`check_existing_gap_issue` and
 `request_clarification_or_addition`), which materialize kit-extension requests
 as GitHub issues. They are registered — and therefore visible to coding
-agents — **only when `GITHUB_OWNER`, `GITHUB_REPO`, and `GITHUB_TOKEN` are all
+agents — **only when `QM_GITHUB_OWNER`, `QM_GITHUB_REPO`, and `QM_GITHUB_TOKEN` are all
 set**. Leave them unset for a fully self-hosted / air-gapped install: the tools
 are not exposed at all, the server never reaches out to GitHub, and the MCP
 instructions automatically omit the gap-filing step. Everything else (kit
@@ -89,9 +89,9 @@ Logging is configured at startup from the environment, so logs can be
 redirected to disk, logstash, syslog, or a custom HTTP endpoint **without
 rebuilding the image** — mount a config file and set an env var.
 
-- `LOG_LEVEL` — level for the default colored console output (used only when
-  `LOG_CONFIG` is unset). Defaults to `INFO`.
-- `LOG_CONFIG` — path to a **TOML** file holding a standard
+- `QM_LOG_LEVEL` — level for the default colored console output (used only when
+  `QM_LOG_CONFIG` is unset). Defaults to `INFO`.
+- `QM_LOG_CONFIG` — path to a **TOML** file holding a standard
   [`logging.config.dictConfig`](https://docs.python.org/3/library/logging.config.html#logging-config-dictschema)
   schema. When set, it takes full control of logging.
 
@@ -101,7 +101,7 @@ stdlib ships no JSON formatter, so a JSON-lines formatter is bundled at
 factory key. Example writing one JSON object per line to a rotating file:
 
 ```toml
-# logging.toml — mount it and set LOG_CONFIG=/data/logging.toml
+# logging.toml — mount it and set QM_LOG_CONFIG=/data/logging.toml
 version = 1
 disable_existing_loggers = false
 
@@ -149,7 +149,7 @@ npm run dev            # → http://localhost:5173
 
 `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID` are **required** — the app
 fails loudly at boot if they are missing. `VITE_OIDC_AUTHORITY` is
-`{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}`.
+`{QM_KEYCLOAK_URL}/realms/{QM_KEYCLOAK_REALM}`.
 
 Run the **backend too** (previous section): the Vite dev server proxies
 `/api` and `/kits` to `http://localhost:8000`, so the browser sees one
@@ -173,10 +173,10 @@ the UI, the API, the MCP endpoint, and a runtime-rendered `/config.js`
 ```bash
 cd webui && npm run build
 cd ../server
-WEBUI_DIST=../webui/dist \
-KEYCLOAK_URL=https://auth.example.com \
-KEYCLOAK_REALM=master \
-RESOURCE_BASE_URL=http://localhost:8000 \
+QM_WEBUI_DIST=../webui/dist \
+QM_KEYCLOAK_URL=https://auth.example.com \
+QM_KEYCLOAK_REALM=master \
+QM_RESOURCE_BASE_URL=http://localhost:8000 \
 uv run uvicorn app.main:app --reload
 ```
 
@@ -193,8 +193,8 @@ Enable it on **both** sides:
 
 ```bash
 # server/.env — local only, never in production
-DEV_AUTH_ENABLED=true
-DEV_SHARED_SECRET=any-long-random-local-string
+QM_DEV_AUTH_ENABLED=true
+QM_DEV_SHARED_SECRET=any-long-random-local-string
 ```
 
 ```bash
@@ -208,11 +208,11 @@ scripts/E2E, mint a token directly:
 
 ```bash
 cd server
-DEV_AUTH_ENABLED=true DEV_SHARED_SECRET=... uv run python -m app.dev_auth
+QM_DEV_AUTH_ENABLED=true QM_DEV_SHARED_SECRET=... uv run python -m app.dev_auth
 ```
 
-How it stays safe in production: `DEV_SHARED_SECRET` unset ⇒ HS256 tokens
-rejected; `DEV_AUTH_ENABLED` unset ⇒ `/auth/dev/*` is a 404; and the SPA's
+How it stays safe in production: `QM_DEV_SHARED_SECRET` unset ⇒ HS256 tokens
+rejected; `QM_DEV_AUTH_ENABLED` unset ⇒ `/auth/dev/*` is a 404; and the SPA's
 `devAuth` gate folds to `false` at build time, so the dev-login code never
 ships. Never set any of these in a deployed environment.
 
@@ -223,7 +223,7 @@ uses authorization code + PKCE, so you need a realm with a **public**
 client:
 
 - **Client ID:** `quartermaster-webui` (override via `VITE_OIDC_CLIENT_ID`
-  for the SPA and `WEBUI_KEYCLOAK_CLIENT_ID` for the backend's `/config.js`).
+  for the SPA and `QM_WEBUI_KEYCLOAK_CLIENT_ID` for the backend's `/config.js`).
 - **Client authentication:** OFF (public). PKCE method `S256`.
 - **Standard flow:** ON.
 - **Valid redirect URIs:** `http://localhost:5173/auth/callback` (Vite dev)
@@ -238,19 +238,19 @@ the `client_credentials` flow (see the README's "Obtaining a token").
 ### Behind a port-forward or reverse proxy
 
 When the SPA is served by the backend (production-style), the server renders
-the OIDC **redirect URI** into `/config.js` from `RESOURCE_BASE_URL`
-(`<RESOURCE_BASE_URL>/auth/callback`), and that value overrides the browser's
+the OIDC **redirect URI** into `/config.js` from `QM_RESOURCE_BASE_URL`
+(`<QM_RESOURCE_BASE_URL>/auth/callback`), and that value overrides the browser's
 own origin. So if you reach the server at a different address than it listens
 on — e.g. a port-forward `50007:8000` or a reverse proxy — set
-`RESOURCE_BASE_URL` to the **externally-reachable** origin you open in the
+`QM_RESOURCE_BASE_URL` to the **externally-reachable** origin you open in the
 browser, not the in-container one:
 
 ```bash
 # accessed via a 50007:8000 port-forward:
-RESOURCE_BASE_URL=http://localhost:50007
+QM_RESOURCE_BASE_URL=http://localhost:50007
 ```
 
-Then register `<RESOURCE_BASE_URL>/auth/callback` (and that origin under
+Then register `<QM_RESOURCE_BASE_URL>/auth/callback` (and that origin under
 **Web origins**) in the Keycloak client. The same value also drives the OAuth
 metadata URLs, so it stays consistent for MCP clients. (This only affects the
 production-style/served-SPA mode; the Vite dev server uses its own origin.)
@@ -258,12 +258,12 @@ production-style/served-SPA mode; the Vite dev server uses its own origin.)
 ## WebDAV authoring endpoint (local)
 
 `/dav` lets you mount the kit catalog as a drive and edit kits with a
-coding agent; writes land on `KITS_ROOT` and are visible to the MCP
+coding agent; writes land on `QM_KITS_ROOT` and are visible to the MCP
 immediately. It uses HTTP Basic (`username` : `app-token`) and **requires
 TLS by default**. For local non-TLS testing, disable that guard:
 
 ```bash
-DAV_REQUIRE_TLS=false   # in server/.env — local testing only
+QM_DAV_REQUIRE_TLS=false   # in server/.env — local testing only
 ```
 
 Mint an app token from the UI's **Mount** page (you must be signed in),

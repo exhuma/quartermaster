@@ -343,7 +343,8 @@ def _load_manifest(root: Path, kit_name: str) -> KitApplicability:
     manifest_file = _manifest_path(root, kit_name)
     if not manifest_file.exists():
         raise FileNotFoundError(
-            f"Missing applicability manifest for kit {kit_name!r}: {manifest_file}"
+            f"Missing applicability manifest for kit {kit_name!r}: "
+            f"{manifest_file}"
         )
     raw = json.loads(manifest_file.read_text(encoding="utf-8"))
     return _validate_manifest(raw, kit_name)
@@ -382,7 +383,9 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
     }
     missing = sorted(required_fields.difference(raw.keys()))
     if missing:
-        raise ValueError(f"Manifest for kit {kit_name!r} missing fields: {missing}")
+        raise ValueError(
+            f"Manifest for kit {kit_name!r} missing fields: {missing}"
+        )
 
     kit_type = str(raw["kit_type"]).strip().lower()
     if kit_type not in _KIT_TYPES:
@@ -404,12 +407,16 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
                     f"Manifest field {name!r} for kit {kit_name!r} "
                     f"must include key {key!r}"
                 )
-            result[key] = _coerce_str_list(value[key], field_name=f"{name}.{key}")
+            result[key] = _coerce_str_list(
+                value[key], field_name=f"{name}.{key}"
+            )
         return result
 
     priority = raw["priority"]
     if not isinstance(priority, int):
-        raise ValueError(f"Manifest field 'priority' for kit {kit_name!r} must be int")
+        raise ValueError(
+            f"Manifest field 'priority' for kit {kit_name!r} must be int"
+        )
 
     return KitApplicability(
         kit_type=kit_type,
@@ -423,7 +430,9 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
         optional_signals=_coerce_str_list(
             raw["optional_signals"], field_name="optional_signals"
         ),
-        related_kits=_coerce_str_list(raw["related_kits"], field_name="related_kits"),
+        related_kits=_coerce_str_list(
+            raw["related_kits"], field_name="related_kits"
+        ),
         priority=priority,
     )
 
@@ -574,7 +583,8 @@ def _parse_changelog(content: str) -> dict[str, str]:
     current_version: str | None = None
     current_lines: list[str] = []
     for line in content.splitlines(keepends=True):
-        m = re.match(r"^## (v[\w.+-]+)", line)  # e.g. ## v1.2.0 or ## v2.0.0-rc1
+        # e.g. ## v1.2.0 or ## v2.0.0-rc1
+        m = re.match(r"^## (v[\w.+-]+)", line)
         if m:
             if current_version is not None:
                 result[current_version] = "".join(
@@ -689,7 +699,10 @@ def _evaluate_candidate(
         # ``domains`` and weak ``optional_signals``. Both describe "what the
         # kit is good at"; the selector intentionally pools them rather than
         # distinguishing a primary domain from a weak hint at match time.
-        "capabilities": set(applicability.domains) | set(applicability.optional_signals),
+        "capabilities": (
+            set(applicability.domains)
+            | set(applicability.optional_signals)
+        ),
         "contexts": set(applicability.contexts),
     }
 
@@ -893,7 +906,9 @@ def select_kits_v2(
     eligible = [c for c in evaluated if not c["ineligible"]]
     eligible.sort(key=lambda c: (-c["score"], c["name"]))
 
-    threshold = SELECT_THRESHOLD_BROADEN if broaden else SELECT_THRESHOLD_DEFAULT
+    threshold = (
+        SELECT_THRESHOLD_BROADEN if broaden else SELECT_THRESHOLD_DEFAULT
+    )
     selected = [c for c in eligible if c["score"] >= threshold]
 
     if not selected and eligible:
@@ -924,7 +939,10 @@ def select_kits_v2(
     top_score = selected[0]["score"] if selected else 0
     if top_score >= SELECT_HIGH_SCORE and coverage >= SELECT_HIGH_COVERAGE:
         confidence = "high"
-    elif top_score >= SELECT_MEDIUM_SCORE and coverage >= SELECT_MEDIUM_COVERAGE:
+    elif (
+        top_score >= SELECT_MEDIUM_SCORE
+        and coverage >= SELECT_MEDIUM_COVERAGE
+    ):
         confidence = "medium"
     else:
         confidence = "low"
@@ -986,7 +1004,10 @@ def explain_kit_v2(
         contexts=contexts,
     )
     catalog, _warnings = _catalog_entries()
-    entries = {info.name: (info, applicability) for info, applicability in catalog}
+    entries = {
+        info.name: (info, applicability)
+        for info, applicability in catalog
+    }
     if name not in entries:
         raise KitNotFoundError(name)
     info, applicability = entries[name]
@@ -1153,7 +1174,9 @@ def compare_kit_versions(
     :raises FileNotFoundError: If the kit has no ``CHANGELOG.md``.
     """
     settings = get_settings()
-    logger.debug("compare_kit_versions: name=%r %r..%r", name, from_version, to_version)
+    logger.debug(
+        "compare_kit_versions: name=%r %r..%r", name, from_version, to_version
+    )
     kit_dir = settings.kits_root / name
     if not kit_dir.is_dir():
         raise KitNotFoundError(name)

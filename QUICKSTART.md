@@ -11,7 +11,7 @@ trying it out — for real authentication and deployment, see the
 
 ## 1. Make a tiny kit catalog
 
-The server serves kits from a directory (`KITS_ROOT`); it isn't bundled with
+The server serves kits from a directory (`QM_KITS_ROOT`); it isn't bundled with
 one. Create a throwaway catalog with a single example kit so there's
 something to see:
 
@@ -58,12 +58,12 @@ MD
 ```bash
 cd server
 uv sync
-DEV_AUTH_ENABLED=true \
-DEV_SHARED_SECRET=local-dev-secret \
-KEYCLOAK_URL=https://auth.example.com \
-KEYCLOAK_REALM=master \
-RESOURCE_BASE_URL=http://localhost:8000 \
-KITS_ROOT=/tmp/qm-kits \
+QM_DEV_AUTH_ENABLED=true \
+QM_DEV_SHARED_SECRET=local-dev-secret \
+QM_KEYCLOAK_URL=https://auth.example.com \
+QM_KEYCLOAK_REALM=master \
+QM_RESOURCE_BASE_URL=http://localhost:8000 \
+QM_KITS_ROOT=/tmp/qm-kits \
 uv run uvicorn app.main:app --reload
 ```
 
@@ -99,9 +99,9 @@ Mint a dev token and point an MCP client at the server:
 
 ```bash
 cd server
-DEV_AUTH_ENABLED=true DEV_SHARED_SECRET=local-dev-secret \
-KEYCLOAK_URL=https://auth.example.com KEYCLOAK_REALM=master \
-RESOURCE_BASE_URL=http://localhost:8000 KITS_ROOT=/tmp/qm-kits \
+QM_DEV_AUTH_ENABLED=true QM_DEV_SHARED_SECRET=local-dev-secret \
+QM_KEYCLOAK_URL=https://auth.example.com QM_KEYCLOAK_REALM=master \
+QM_RESOURCE_BASE_URL=http://localhost:8000 QM_KITS_ROOT=/tmp/qm-kits \
 uv run python -m app.dev_auth                     # prints a Bearer token
 ```
 
@@ -117,8 +117,8 @@ Then call `list_kits` / `get_kit` from the agent.
 
 ## Important caveats
 
-- **Dev auth is local-only and insecure.** `DEV_AUTH_ENABLED` /
-  `DEV_SHARED_SECRET` (and `VITE_DEV_AUTH`) must never be set in a deployed
+- **Dev auth is local-only and insecure.** `QM_DEV_AUTH_ENABLED` /
+  `QM_DEV_SHARED_SECRET` (and `VITE_DEV_AUTH`) must never be set in a deployed
   environment. They're off by default and stripped from production builds.
 - **The published Docker image's UI needs real Keycloak.** The dev-auth
   bypass only works under the Vite dev server (`npm run dev`); it is

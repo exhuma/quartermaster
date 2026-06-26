@@ -69,7 +69,7 @@ async function saveManifest(): Promise<void> {
   try {
     Object.assign(
       manifest,
-      await editor.saveApplicability(props.name, { ...manifest }),
+      await editor.saveApplicability(props.name, { ...manifest })
     )
     manifestSaved.value = true
   } catch (err) {
@@ -81,7 +81,7 @@ async function runCompare(): Promise<void> {
   comparison.value = await editor.compareVersions(
     props.name,
     compareFrom.value,
-    compareTo.value,
+    compareTo.value
   )
 }
 </script>

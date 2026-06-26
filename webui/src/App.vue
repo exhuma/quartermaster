@@ -25,12 +25,7 @@ onMounted(refresh)
           Sign out
         </v-btn>
       </template>
-      <v-btn
-        v-else
-        variant="text"
-        prepend-icon="mdi-login"
-        @click="login()"
-      >
+      <v-btn v-else variant="text" prepend-icon="mdi-login" @click="login()">
         Sign in
       </v-btn>
 

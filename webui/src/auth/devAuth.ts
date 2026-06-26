@@ -16,7 +16,7 @@ export async function setupDevAuth(): Promise<void> {
   if (!response.ok) {
     throw new Error(
       `Dev auth unavailable (HTTP ${response.status}). Set ` +
-        'DEV_AUTH_ENABLED and DEV_SHARED_SECRET on the server.',
+        'DEV_AUTH_ENABLED and DEV_SHARED_SECRET on the server.'
     )
   }
   const data = (await response.json()) as { access_token: string }

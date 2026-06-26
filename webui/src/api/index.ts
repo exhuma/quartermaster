@@ -49,7 +49,7 @@ export function setAuthSuccessHandler(handler: () => void): void {
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown,
+  body?: unknown
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: VENDOR_MEDIA_TYPE }
   const token = await tokenProvider.getToken()

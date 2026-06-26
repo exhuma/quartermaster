@@ -24,7 +24,6 @@ from app.auth import JWTAuthMiddleware, _select_token_validation_mode
 from app.config import Settings, get_settings
 from app.dev_auth import decode_dev_token, mint_dev_token
 
-
 # A dev secret of adequate length (>= 32 bytes) to avoid HMAC warnings.
 SECRET = "dev-shared-secret-0123456789-abcdefghij"
 
@@ -178,7 +177,7 @@ def _make_app(monkeypatch, tmp_path: Path, **env):
     (tmp_path / "kits").mkdir(exist_ok=True)
     base.update(env)
     for key, value in base.items():
-        monkeypatch.setenv(key, value)
+        monkeypatch.setenv(f"QM_{key}", value)
     get_settings.cache_clear()
     from app.main import create_app
 

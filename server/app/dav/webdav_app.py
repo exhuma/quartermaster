@@ -11,7 +11,7 @@ Authentication is handled **upstream** by ``JWTAuthMiddleware`` (HTTP Basic
 ``username:app-token`` on the ``/dav`` prefix), so wsgidav itself runs with
 anonymous access — it never sees credentials it would need to validate.
 
-The kit catalog directory is resolved from the ``KITS_ROOT`` environment
+The kit catalog directory is resolved from the ``QM_KITS_ROOT`` environment
 variable (the production knob), mirroring ``app.webui`` so app construction
 does not require a fully-validated Settings object.
 """
@@ -36,17 +36,17 @@ def _kits_root() -> Path:
     """
     Resolve the kit catalog root from the environment.
 
-    ``KITS_ROOT`` is required — the catalog is external and never bundled
+    ``QM_KITS_ROOT`` is required — the catalog is external and never bundled
     with the server. Read directly from the environment (rather than the
     full ``Settings``) so mounting ``/dav`` at import time does not force
     validation of unrelated settings.
 
-    :raises RuntimeError: If ``KITS_ROOT`` is unset or empty.
+    :raises RuntimeError: If ``QM_KITS_ROOT`` is unset or empty.
     """
-    root = os.environ.get("KITS_ROOT")
+    root = os.environ.get("QM_KITS_ROOT")
     if not root:
         raise RuntimeError(
-            "KITS_ROOT is not set. Point it at your kit catalog "
+            "QM_KITS_ROOT is not set. Point it at your kit catalog "
             "(a local checkout in dev, or the mounted volume in production, "
             "e.g. /data/kits) — the catalog is not bundled with this server."
         )
@@ -89,7 +89,9 @@ def mount_dav(app: FastAPI) -> None:
     :param app: The FastAPI application.
     """
     kits_root = _kits_root()
-    app.mount(DAV_MOUNT_PATH, build_dav_asgi(kits_root))
+    # a2wsgi's WSGIMiddleware is a valid ASGI app at runtime; Starlette's
+    # mount() type hint does not recognise the bridged WSGI callable.
+    app.mount(DAV_MOUNT_PATH, build_dav_asgi(kits_root))  # type: ignore[arg-type]
     logger.info(
         "WebDAV authoring mounted at %s over %s", DAV_MOUNT_PATH, kits_root
     )

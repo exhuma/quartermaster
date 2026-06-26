@@ -16,14 +16,14 @@ const devName = ref<string | null>(null)
 
 export function useAuth() {
   const isAuthenticated = computed(
-    () => !!devName.value || (!!user.value && !user.value.expired),
+    () => !!devName.value || (!!user.value && !user.value.expired)
   )
   const displayName = computed(
     () =>
       devName.value ??
       user.value?.profile.name ??
       user.value?.profile.email ??
-      '',
+      ''
   )
 
   function enterDevSession(name: string): void {

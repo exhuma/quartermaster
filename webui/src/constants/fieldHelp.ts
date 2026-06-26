@@ -47,7 +47,7 @@ export const sectionHelp = {
   id:
     "Stable section identifier — the Markdown file's stem (e.g. " +
     "'invariant'). Used in URLs and to request a single section. Lowercase " +
-    "words joined by hyphens; fixed after creation.",
+    'words joined by hyphens; fixed after creation.',
   title: 'Human-readable section heading, shown in the outline and the list.',
   gloss:
     'One-line summary shown in the kit outline. Write a self-contained ' +

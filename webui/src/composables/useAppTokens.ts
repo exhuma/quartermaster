@@ -17,7 +17,7 @@ export function useAppTokens() {
 
   async function mint(label: string): Promise<MintedToken> {
     const minted = await withLoading(
-      api.post<MintedToken>('/api/app-tokens', { label }),
+      api.post<MintedToken>('/api/app-tokens', { label })
     )
     await fetchTokens()
     return minted

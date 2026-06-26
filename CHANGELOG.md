@@ -4,6 +4,19 @@ All notable changes to the Quartermaster server are documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/), and the
 project aims to follow semantic versioning.
 
+## Unreleased
+
+### Changed (breaking)
+
+- **All server environment variables are now prefixed with `QM_`** (e.g.
+  `KEYCLOAK_URL` → `QM_KEYCLOAK_URL`, `KITS_ROOT` → `QM_KITS_ROOT`,
+  `LOG_LEVEL` → `QM_LOG_LEVEL`). This namespaces Quartermaster's configuration
+  and avoids collisions with unrelated environment variables. **Action
+  required:** rename every variable in your `.env`, Docker `ENV`, and
+  `docker-compose` environment to the `QM_`-prefixed form. The browser/SPA
+  build variables (`VITE_*`) are unchanged. See `contract.md` for the full
+  configuration contract.
+
 ## v0.1.0 — Initial public release
 
 First public release of **Quartermaster**, a self-hosted MCP server that
@@ -21,5 +34,5 @@ serves versioned AI instruction kits to coding agents.
 - Vue 3 + Vuetify single-page web UI for kit management and MCP integration
   setup.
 - The kit catalog is decoupled from the server: supplied at runtime via
-  `KITS_ROOT` and never bundled into the image.
+  `QM_KITS_ROOT` and never bundled into the image.
 - Container image published to GitHub Container Registry.

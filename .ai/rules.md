@@ -6,7 +6,7 @@ authenticated HTTP endpoint. Its consumers are humans running and
 deploying the server, and coding agents working on the server code.
 
 **The kit catalog is not in this repository.** Kits are *data*, served
-from an external catalog supplied at runtime via `KITS_ROOT` (a local
+from an external catalog supplied at runtime via `QM_KITS_ROOT` (a local
 checkout in dev, a mounted volume in production). Do **not** add a `kits/`
 directory or any `instructions/` kit guide here — kit authoring belongs in
 the separate kit-catalog repository, under its own rules.
@@ -41,10 +41,10 @@ npm run build                # type-check + production build
 npm run check:no-dev-auth    # guard: no dev-auth code in the production bundle
 ```
 
-- The dev-auth bypass (`DEV_AUTH_ENABLED` / `DEV_SHARED_SECRET`, and the
+- The dev-auth bypass (`QM_DEV_AUTH_ENABLED` / `QM_DEV_SHARED_SECRET`, and the
   frontend `VITE_DEV_AUTH`) is **dev-only** and must stay inert in
-  production. Never commit a `DEV_SHARED_SECRET` value.
-- `KITS_ROOT` is required — there is no in-repo fallback catalog. Tests
+  production. Never commit a `QM_DEV_SHARED_SECRET` value.
+- `QM_KITS_ROOT` is required — there is no in-repo fallback catalog. Tests
   that need a real catalog skip cleanly when one is absent.
 - See [`CLAUDE.md`](../CLAUDE.md) for the detailed server architecture.
 

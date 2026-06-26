@@ -48,7 +48,8 @@ def mint_dev_token(
     :returns: A signed HS256 JWT.
     :raises RuntimeError: If the dev shared secret is not configured.
     """
-    if not settings.dev_shared_secret:
+    secret = settings.dev_shared_secret
+    if not secret:
         raise RuntimeError("dev_shared_secret is not configured")
     now = int(time.time())
     payload: dict[str, object] = {
@@ -61,7 +62,7 @@ def mint_dev_token(
     }
     if settings.keycloak_audience:
         payload["aud"] = settings.keycloak_audience
-    return jwt.encode(payload, settings.dev_shared_secret, algorithm=ALGORITHM)
+    return jwt.encode(payload, secret, algorithm=ALGORITHM)
 
 
 def decode_dev_token(token: str, settings: Settings) -> dict:
@@ -73,6 +74,9 @@ def decode_dev_token(token: str, settings: Settings) -> dict:
     :returns: Decoded claims.
     :raises jwt.PyJWTError: If validation fails.
     """
+    secret = settings.dev_shared_secret
+    if not secret:
+        raise jwt.InvalidKeyError("dev_shared_secret is not configured")
     decode_kwargs: dict = {
         "algorithms": [ALGORITHM],
         "issuer": settings.keycloak_issuer,
@@ -81,7 +85,7 @@ def decode_dev_token(token: str, settings: Settings) -> dict:
         decode_kwargs["audience"] = settings.keycloak_audience
     else:
         decode_kwargs["options"] = {"verify_aud": False}
-    return jwt.decode(token, settings.dev_shared_secret, **decode_kwargs)
+    return jwt.decode(token, secret, **decode_kwargs)
 
 
 def _main() -> None:

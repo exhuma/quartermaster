@@ -26,8 +26,8 @@ services:
     env_file: .env
     environment:
       # The kit catalog is mounted at /data/kits (see volumes below);
-      # point the server at it. Overrides any KITS_ROOT in .env.
-      - KITS_ROOT=/data/kits
+      # point the server at it. Overrides any QM_KITS_ROOT in .env.
+      - QM_KITS_ROOT=/data/kits
     volumes:
       # ADAPT: bind-mount your kit catalog here. The catalog is NOT part of
       # this repo; point this at your own (possibly private) kit-catalog
@@ -53,7 +53,7 @@ services:
     # covers every path on the host, including the web UI, /api, the MCP
     # mount, and the /dav WebDAV endpoint. Because Traefik terminates TLS
     # (entrypoint websecure + tls), /dav is reached over HTTPS, satisfying
-    # DAV_REQUIRE_TLS — WebDAV Basic credentials never travel in cleartext.
+    # QM_DAV_REQUIRE_TLS — WebDAV Basic credentials never travel in cleartext.
 
 networks:
   traefik-proxy:

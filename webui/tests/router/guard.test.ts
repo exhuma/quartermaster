@@ -16,10 +16,7 @@ const um = userManager as unknown as {
   signinRedirect: ReturnType<typeof vi.fn>
 }
 
-function route(
-  requiresAuth: boolean,
-  fullPath = '/',
-): RouteLocationNormalized {
+function route(requiresAuth: boolean, fullPath = '/'): RouteLocationNormalized {
   return {
     fullPath,
     meta: { requiresAuth },

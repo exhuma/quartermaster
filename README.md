@@ -20,7 +20,7 @@ Quartermaster ships as two parts:
 
 **The kit catalog is *not* part of this repository.** Kits are *data*,
 supplied at runtime from a separate kit-catalog checkout (dev) or a
-mounted volume (production) via the `KITS_ROOT` setting. This keeps the
+mounted volume (production) via the `QM_KITS_ROOT` setting. This keeps the
 releasable server image independent of any (possibly private) kit content.
 
 Running it locally? See [`DEVELOPMENT.md`](DEVELOPMENT.md).
@@ -42,12 +42,12 @@ catalog to mount:
 # 1. Build the image (build context is the repository ROOT).
 docker build -f server/Dockerfile . -t quartermaster
 
-# 2. Run it, pointing KITS_ROOT at your own kit-catalog checkout.
+# 2. Run it, pointing QM_KITS_ROOT at your own kit-catalog checkout.
 docker run --rm -p 8000:8000 \
-  -e KEYCLOAK_URL=https://your-keycloak.example.com \
-  -e KEYCLOAK_REALM=your-realm \
-  -e RESOURCE_BASE_URL=http://localhost:8000 \
-  -e KITS_ROOT=/data/kits \
+  -e QM_KEYCLOAK_URL=https://your-keycloak.example.com \
+  -e QM_KEYCLOAK_REALM=your-realm \
+  -e QM_RESOURCE_BASE_URL=http://localhost:8000 \
+  -e QM_KITS_ROOT=/data/kits \
   -v /path/to/your/kit-catalog:/data/kits \
   quartermaster
 
@@ -125,7 +125,7 @@ quartermaster (FastAPI + FastMCP)
    ├─ JWTAuthMiddleware  ← validates RS256/ES256 JWT
    └─ POST /kits/mcp      ← MCP streamable-HTTP endpoint
          │
-         └─ reads kit instructions/ section files from KITS_ROOT
+         └─ reads kit instructions/ section files from QM_KITS_ROOT
             (an external catalog mounted at /data/kits)
 ```
 
@@ -162,7 +162,7 @@ add an **Audience** mapper to the client:
 - **Included client audience**: `quartermaster`
 - **Add to access token**: ON
 
-Then set `KEYCLOAK_AUDIENCE=quartermaster` in `server/.env`.
+Then set `QM_KEYCLOAK_AUDIENCE=quartermaster` in `server/.env`.
 
 ### Obtaining a token
 
@@ -175,7 +175,7 @@ consider extending to 24 hours for service accounts via
 ```bash
 export QUARTERMASTER_TOKEN=$(
   curl -s -X POST \
-    "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+    "${QM_KEYCLOAK_URL}/realms/${QM_KEYCLOAK_REALM}/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "grant_type=client_credentials" \
     -d "client_id=${KC_CLIENT_ID}" \
@@ -184,8 +184,8 @@ export QUARTERMASTER_TOKEN=$(
 )
 ```
 
-Save `KC_CLIENT_ID`, `KC_CLIENT_SECRET`, and `KEYCLOAK_URL`/
-`KEYCLOAK_REALM` in your shell profile or a secrets manager; never in
+Save `KC_CLIENT_ID`, `KC_CLIENT_SECRET`, and `QM_KEYCLOAK_URL`/
+`QM_KEYCLOAK_REALM` in your shell profile or a secrets manager; never in
 the project repository.
 
 ### Optional: fixed-header auth for Copilot coding agent
@@ -194,8 +194,8 @@ If your Copilot coding-agent integration sends fixed headers instead of
 bearer tokens, enable this mode in `server/.env`:
 
 ```bash
-COPILOT_AUTH_ENABLED=true
-COPILOT_AUTH_TIMEOUT_SECONDS=3.0
+QM_COPILOT_AUTH_ENABLED=true
+QM_COPILOT_AUTH_TIMEOUT_SECONDS=3.0
 ```
 
 The server validates `X-Client-Id` and `X-Client-Secret` against
@@ -429,7 +429,7 @@ opencode:
 ```bash
 export QUARTERMASTER_TOKEN=$(
   curl -s -X POST \
-    "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+    "${QM_KEYCLOAK_URL}/realms/${QM_KEYCLOAK_REALM}/protocol/openid-connect/token" \
     -d grant_type=client_credentials \
     -d client_id="${KC_CLIENT_ID}" \
     -d client_secret="${KC_CLIENT_SECRET}" \
@@ -465,15 +465,15 @@ docker build -f server/Dockerfile . -t quartermaster
 ```bash
 cd server
 cp .env.example .env
-# Edit .env — fill in KEYCLOAK_URL, KEYCLOAK_REALM, RESOURCE_BASE_URL.
-# KITS_ROOT is set to /data/kits by docker-compose (the mounted catalog).
+# Edit .env — fill in QM_KEYCLOAK_URL, QM_KEYCLOAK_REALM, QM_RESOURCE_BASE_URL.
+# QM_KITS_ROOT is set to /data/kits by docker-compose (the mounted catalog).
 ```
 
-> **Set `RESOURCE_BASE_URL` to the origin the browser/client actually
+> **Set `QM_RESOURCE_BASE_URL` to the origin the browser/client actually
 > reaches** (your public domain, or a `host:port` if you front the server
 > with a port-forward or reverse proxy) — not the in-container port. The
 > server derives the web UI's OIDC redirect URI from it
-> (`<RESOURCE_BASE_URL>/auth/callback`) and renders it into `/config.js` at
+> (`<QM_RESOURCE_BASE_URL>/auth/callback`) and renders it into `/config.js` at
 > runtime, so a mismatch breaks the browser login. Register that exact
 > redirect URI in your Keycloak client.
 
@@ -502,7 +502,7 @@ For running the server **and the web UI** locally, see
 
 Quartermaster serves a catalog of kits but does **not** contain one. The
 catalog lives in its own repository and is supplied to the server via
-`KITS_ROOT`. You can author and edit kits in three ways:
+`QM_KITS_ROOT`. You can author and edit kits in three ways:
 
 - **Directly in the catalog repository** — kits are plain Markdown +
   `index.toml`/`applicability.json` files. Edits are visible to a running

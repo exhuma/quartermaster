@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import json
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app.kits import (
     WEIGHT_LANGUAGES,
@@ -91,7 +92,10 @@ def kit_root(tmp_path: Path) -> Path:
                     "title": "Architecture invariants",
                     "gloss": "Non-negotiables",
                     "always_load": True,
-                    "body": f"## Architecture invariants\n\nKeep {ver} layered.\n",
+                    "body": (
+                        f"## Architecture invariants\n\n"
+                        f"Keep {ver} layered.\n"
+                    ),
                 },
                 {
                     "file": "tooling.md",
@@ -227,7 +231,11 @@ def test_load_kit_index_parses_sections(kit_root: Path) -> None:
     index_path = kit_root / "kit-alpha" / "v1" / "instructions" / "index.toml"
     index = _load_kit_index(index_path, "kit-alpha")
     assert index.summary == "Alpha v1 summary."
-    assert [s.id for s in index.sections] == ["overview", "invariant", "tooling"]
+    assert [s.id for s in index.sections] == [
+        "overview",
+        "invariant",
+        "tooling",
+    ]
     invariant = next(s for s in index.sections if s.id == "invariant")
     assert invariant.always_load is True
     assert invariant.title == "Architecture invariants"
@@ -791,7 +799,8 @@ def test_compare_kit_versions_no_false_positive_substring(
     )
     (tmp_path / "my-kit" / "CHANGELOG.md").write_text(
         "# Changelog: my-kit\n\n"
-        "## v1.1.0 — Docs\n\n- Improved therapist scheduling wording (userXfacing).\n\n"
+        "## v1.1.0 — Docs\n\n"
+        "- Improved therapist scheduling wording (userXfacing).\n\n"
         "## v1.0.0 — Initial\n\n- First release.\n",
         encoding="utf-8",
     )
@@ -836,7 +845,7 @@ def test_compare_kit_versions_routes_is_user_facing(
 # they skip cleanly when no catalog is mounted.
 _REAL_KITS_ROOT = Path(
     os.environ.get(
-        "KITS_ROOT", str(Path(__file__).resolve().parents[2] / "kits")
+        "QM_KITS_ROOT", str(Path(__file__).resolve().parents[2] / "kits")
     )
 )
 

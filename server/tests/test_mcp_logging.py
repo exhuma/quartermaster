@@ -28,7 +28,9 @@ def test_on_call_tool_logs_name_session_and_sequence(caplog):
         return "ok-result"
 
     with caplog.at_level(logging.INFO, logger="app.mcp_audit"):
-        r1 = asyncio.run(mw.on_call_tool(_ctx(tool_name="select_kits"), call_next))
+        r1 = asyncio.run(
+            mw.on_call_tool(_ctx(tool_name="select_kits"), call_next)
+        )
         r2 = asyncio.run(mw.on_call_tool(_ctx(tool_name="get_kit"), call_next))
 
     assert r1 == "ok-result" and r2 == "ok-result"

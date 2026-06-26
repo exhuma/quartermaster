@@ -130,8 +130,8 @@ async function confirmDelete(): Promise<void> {
     <v-dialog :model-value="!!deleteTarget" max-width="420">
       <v-card title="Delete kit">
         <v-card-text>
-          Delete <strong>{{ deleteTarget }}</strong> and all its versions?
-          This cannot be undone.
+          Delete <strong>{{ deleteTarget }}</strong> and all its versions? This
+          cannot be undone.
         </v-card-text>
         <v-card-actions>
           <v-spacer />

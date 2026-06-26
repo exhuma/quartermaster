@@ -10,11 +10,11 @@ until now the server had **no** visibility into it — the ASGI-layer logs
 (:mod:`app.auth`, :mod:`app.user_agent`) see ``POST /kits/mcp`` as one opaque
 request and cannot tell which tool was called.
 
-This middleware closes that gap. The server cannot see user prompts, but it sees
-exactly one ``initialize`` per session plus the ordered ``tools/call`` invocations
-within it. Correlating by ``session`` and ``seq`` lets you compute the metric that
-confirms or refutes the "agents aren't engaging" hunch: sessions that initialize
-but never call a discovery/load tool.
+This middleware closes that gap. The server cannot see user prompts, but it
+sees exactly one ``initialize`` per session plus the ordered ``tools/call``
+invocations within it. Correlating by ``session`` and ``seq`` lets you compute
+the metric that confirms or refutes the "agents aren't engaging" hunch:
+sessions that initialize but never call a discovery/load tool.
 
 Log emission never raises into the tool path — a broken logger must not break a
 tool call.
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
@@ -67,7 +68,11 @@ class ToolCallAuditMiddleware(Middleware):
         self._seq[key] = nxt
         return nxt
 
-    async def on_initialize(self, context: MiddlewareContext, call_next):
+    async def on_initialize(
+        self,
+        context: MiddlewareContext,
+        call_next: Callable[[MiddlewareContext], Awaitable[Any]],
+    ) -> Any:
         """Emit a session-start record, then delegate."""
         ctx = context.fastmcp_context
         try:
@@ -76,11 +81,15 @@ class ToolCallAuditMiddleware(Middleware):
                 _safe_attr(ctx, "session_id"),
                 _safe_attr(ctx, "client_id"),
             )
-        except Exception:  # pragma: no cover - logging must never break the call
+        except Exception:  # pragma: no cover - logging never breaks the call
             pass
         return await call_next(context)
 
-    async def on_call_tool(self, context: MiddlewareContext, call_next):
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext,
+        call_next: Callable[[MiddlewareContext], Awaitable[Any]],
+    ) -> Any:
         """Emit a tool-call record (name + per-session seq + outcome)."""
         ctx = context.fastmcp_context
         session_id = _safe_attr(ctx, "session_id")
@@ -105,5 +114,5 @@ class ToolCallAuditMiddleware(Middleware):
                     ok,
                     (time.perf_counter() - started) * 1000.0,
                 )
-            except Exception:  # pragma: no cover - logging must never break the call
+            except Exception:  # pragma: no cover - logging must not break
                 pass

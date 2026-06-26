@@ -23,7 +23,7 @@ Quartermaster terminates authentication **inside the application**
 interest:
 
 - Authentication / authorization bypass on `/api`, `/kits`, or `/dav`.
-- The dev-only auth bypass (`DEV_AUTH_ENABLED` / `DEV_SHARED_SECRET`,
+- The dev-only auth bypass (`QM_DEV_AUTH_ENABLED` / `QM_DEV_SHARED_SECRET`,
   `VITE_DEV_AUTH`) being reachable in a production build. Both flags must
   be unset in production; reports of this leaking are in scope.
 - Path traversal or write-confinement escapes in the kit-write / WebDAV

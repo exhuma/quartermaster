@@ -11,7 +11,7 @@ const { tokens, fetchTokens, mint, revoke } = useAppTokens()
 const davUrl = computed(() =>
   info.value
     ? `${info.value.server_origin}/dav`
-    : `${window.location.origin}/dav`,
+    : `${window.location.origin}/dav`
 )
 const davsUrl = computed(() => davUrl.value.replace(/^https/, 'davs'))
 
@@ -66,8 +66,8 @@ async function submitMint(): Promise<void> {
   <v-container>
     <h1 class="text-h5 font-weight-medium mb-1">Mount kits locally</h1>
     <p class="text-medium-emphasis mb-4">
-      Mount the catalog as a drive and author kits with a coding agent.
-      Changes are visible to the MCP immediately — no restart.
+      Mount the catalog as a drive and author kits with a coding agent. Changes
+      are visible to the MCP immediately — no restart.
     </p>
 
     <v-card class="mb-6" variant="tonal" color="primary">
@@ -90,16 +90,11 @@ async function submitMint(): Promise<void> {
     <v-card class="mb-6" title="App tokens">
       <v-card-text>
         <p class="mb-3">
-          WebDAV mounts authenticate with HTTP Basic — use any username and
-          an app token as the password. Mint one here; it is shown once.
+          WebDAV mounts authenticate with HTTP Basic — use any username and an
+          app token as the password. Mint one here; it is shown once.
         </p>
 
-        <v-alert
-          v-if="minted"
-          type="success"
-          variant="tonal"
-          class="mb-3"
-        >
+        <v-alert v-if="minted" type="success" variant="tonal" class="mb-3">
           <div class="mb-1 font-weight-medium">
             New token (copy it now — it won't be shown again):
           </div>
@@ -147,11 +142,7 @@ async function submitMint(): Promise<void> {
 
     <v-card title="Mount instructions">
       <v-expansion-panels>
-        <v-expansion-panel
-          v-for="s in steps"
-          :key="s.os"
-          :title="s.os"
-        >
+        <v-expansion-panel v-for="s in steps" :key="s.os" :title="s.os">
           <template #text>
             <pre class="snippet">{{ s.body }}</pre>
           </template>

@@ -32,30 +32,31 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 
 from app.logging_config import configure_logging
 
 # Configure logging before importing modules that grab loggers, so import-time
-# records are formatted. Operators control this via LOG_CONFIG / LOG_LEVEL
+# records are formatted. Operators control this via QM_LOG_CONFIG / QM_LOG_LEVEL
 # (see app/logging_config.py) without rebuilding the image.
 configure_logging()
 
-from fastmcp import FastMCP
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastmcp import FastMCP
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 from app.auth import JWTAuthMiddleware
 from app.config import get_settings
+from app.dav.webdav_app import mount_dav
 from app.kits import (
     KitConflictError,
     KitNotFoundError,
     KitSectionNotFoundError,
     KitValidationError,
     KitVersionNotFoundError,
-    compare_kit_versions as _compare_kit_versions,
     explain_kit_v2,
     list_all_kits,
     list_available_traits_v2,
@@ -64,18 +65,20 @@ from app.kits import (
     read_kit_outline,
     select_kits_v2,
 )
-from app.dav.webdav_app import mount_dav
+from app.kits import (
+    compare_kit_versions as _compare_kit_versions,
+)
 from app.mcp_logging import ToolCallAuditMiddleware
-from app.routers import app_tokens, clients, kits_admin, integration
-from app.storage.kit_writes import KitPathError
-from app.user_agent import UserAgentMiddleware
-from app.webui import mount_webui
 from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.requests import (
     check_existing_kit_extension_issue as _check_existing_kit_extension_issue,
 )
 from app.requests import request_kit_extension as _request_kit_extension
+from app.routers import app_tokens, clients, integration, kits_admin
+from app.storage.kit_writes import KitPathError
+from app.user_agent import UserAgentMiddleware
+from app.webui import mount_webui
 
 # ---------------------------------------------------------------------------
 # MCP server
@@ -568,7 +571,9 @@ async def oauth_protected_resource_metadata_path(path: str) -> JSONResponse:
     settings = get_settings()
     resource = f"{settings.server_origin}/{path}"
     logger.debug(
-        "oauth-protected-resource (path-specific): path=%r resource=%s", path, resource
+        "oauth-protected-resource (path-specific): path=%r resource=%s",
+        path,
+        resource,
     )
     return JSONResponse(
         {
@@ -638,7 +643,9 @@ def _register_exception_handlers(application: FastAPI) -> None:
     :param application: The FastAPI app to attach handlers to.
     """
 
-    def _make_handler(code: int):
+    def _make_handler(
+        code: int,
+    ) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
         async def _handler(_request: Request, exc: Exception) -> JSONResponse:
             return JSONResponse(
                 status_code=code, content={"detail": str(exc)}
@@ -701,13 +708,17 @@ def create_app() -> FastAPI:
     # ONLY when explicitly enabled, so /auth/dev/* is a plain 404 in
     # production. Read from the environment directly so app construction does
     # not require a fully-validated Settings object.
-    if os.environ.get("DEV_AUTH_ENABLED", "").lower() in ("1", "true", "yes"):
+    if os.environ.get("QM_DEV_AUTH_ENABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
         from app.routers import auth_dev
 
         application.include_router(auth_dev.router)
         logger.warning(
             "DEV AUTH ENABLED: /auth/dev/* mounted. Never set "
-            "DEV_AUTH_ENABLED in production."
+            "QM_DEV_AUTH_ENABLED in production."
         )
 
     _register_exception_handlers(application)

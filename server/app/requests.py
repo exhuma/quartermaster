@@ -258,7 +258,9 @@ def check_existing_kit_extension_issue(
         "exists": existing_issue is not None,
         "request": payload,
         "github_issue": (
-            _extract_issue_metadata(owner=owner, repo=repo, issue=existing_issue)
+            _extract_issue_metadata(
+                owner=owner, repo=repo, issue=existing_issue
+            )
             if existing_issue is not None
             else None
         ),
@@ -320,5 +322,7 @@ def request_kit_extension(
         "status": "created",
         "message": "Request materialized as GitHub issue.",
         "request": payload,
-        "github_issue": _extract_issue_metadata(owner=owner, repo=repo, issue=issue),
+        "github_issue": _extract_issue_metadata(
+            owner=owner, repo=repo, issue=issue
+        ),
     }

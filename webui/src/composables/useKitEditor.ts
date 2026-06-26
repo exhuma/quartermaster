@@ -31,39 +31,36 @@ export function useKitEditor() {
 
   function getApplicability(name: string): Promise<Applicability> {
     return withLoading(
-      api.get<Applicability>(`/api/kits/${enc(name)}/applicability`),
+      api.get<Applicability>(`/api/kits/${enc(name)}/applicability`)
     )
   }
 
   function saveApplicability(
     name: string,
-    manifest: Applicability,
+    manifest: Applicability
   ): Promise<Applicability> {
     return withLoading(
-      api.put<Applicability>(
-        `/api/kits/${enc(name)}/applicability`,
-        manifest,
-      ),
+      api.put<Applicability>(`/api/kits/${enc(name)}/applicability`, manifest)
     )
   }
 
   function getOutline(name: string, version: string): Promise<KitOutline> {
     return withLoading(
       api.get<KitOutline>(
-        `/api/kits/${enc(name)}/versions/${enc(version)}/outline`,
-      ),
+        `/api/kits/${enc(name)}/versions/${enc(version)}/outline`
+      )
     )
   }
 
   function getSection(
     name: string,
     version: string,
-    id: string,
+    id: string
   ): Promise<SectionContent> {
     return withLoading(
       api.get<SectionContent>(
-        `/api/kits/${enc(name)}/versions/${enc(version)}/sections/${enc(id)}`,
-      ),
+        `/api/kits/${enc(name)}/versions/${enc(version)}/sections/${enc(id)}`
+      )
     )
   }
 
@@ -71,50 +68,48 @@ export function useKitEditor() {
     name: string,
     version: string,
     id: string,
-    payload: Omit<SectionContent, 'id'>,
+    payload: Omit<SectionContent, 'id'>
   ): Promise<SectionContent> {
     return withLoading(
       api.put<SectionContent>(
         `/api/kits/${enc(name)}/versions/${enc(version)}/sections/${enc(id)}`,
-        payload,
-      ),
+        payload
+      )
     )
   }
 
   function deleteSection(
     name: string,
     version: string,
-    id: string,
+    id: string
   ): Promise<string[]> {
     return withLoading(
       api.delete<string[]>(
-        `/api/kits/${enc(name)}/versions/${enc(version)}/sections/${enc(id)}`,
-      ),
+        `/api/kits/${enc(name)}/versions/${enc(version)}/sections/${enc(id)}`
+      )
     )
   }
 
   function deleteVersion(name: string, version: string): Promise<string[]> {
     return withLoading(
-      api.delete<string[]>(
-        `/api/kits/${enc(name)}/versions/${enc(version)}`,
-      ),
+      api.delete<string[]>(`/api/kits/${enc(name)}/versions/${enc(version)}`)
     )
   }
 
   function getChangelog(name: string): Promise<{ changelog: string }> {
     return withLoading(
-      api.get<{ changelog: string }>(`/api/kits/${enc(name)}/changelog`),
+      api.get<{ changelog: string }>(`/api/kits/${enc(name)}/changelog`)
     )
   }
 
   function compareVersions(
     name: string,
     from: string,
-    to: string,
+    to: string
   ): Promise<VersionCompare> {
     const query = `from=${enc(from)}&to=${enc(to)}`
     return withLoading(
-      api.get<VersionCompare>(`/api/kits/${enc(name)}/compare?${query}`),
+      api.get<VersionCompare>(`/api/kits/${enc(name)}/compare?${query}`)
     )
   }
 

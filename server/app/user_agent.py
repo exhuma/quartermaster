@@ -24,7 +24,10 @@ from __future__ import annotations
 import logging
 import re
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import (
+    BaseHTTPMiddleware,
+    RequestResponseEndpoint,
+)
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -63,7 +66,9 @@ def _is_exempt(method: str, path: str) -> bool:
 class UserAgentMiddleware(BaseHTTPMiddleware):
     """Refuse requests from unregistered, non-browser User-Agents."""
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         """
         Allow browsers and registered clients; refuse the rest.
 

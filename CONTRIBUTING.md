@@ -15,7 +15,7 @@ cd server && uv sync
 cd webui && npm install
 ```
 
-Note the kit **catalog is not part of this repository** — point `KITS_ROOT`
+Note the kit **catalog is not part of this repository** — point `QM_KITS_ROOT`
 at a local checkout of a kit catalog to run the server against real data.
 
 ## Before you open a pull request

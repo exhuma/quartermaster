@@ -2,7 +2,7 @@
 
 A **kit** is a versioned, agent-facing guide plus the metadata Quartermaster
 uses to discover, rank, and serve it. Kits live in your **kit-catalog repo**
-(not here) — the directory `KITS_ROOT` points at. Quartermaster validates
+(not here) — the directory `QM_KITS_ROOT` points at. Quartermaster validates
 every kit on load and on write, so a malformed kit is rejected rather than
 served.
 

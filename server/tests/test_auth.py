@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -74,7 +75,9 @@ def test_missing_auth_returns_401() -> None:
     client = _client(_settings(copilot_auth_enabled=False))
     response = client.get("/api/protected")
     assert response.status_code == 401
-    assert response.json()["detail"] == "Missing or malformed Authorization header"
+    assert response.json()["detail"] == (
+        "Missing or malformed Authorization header"
+    )
 
 
 def test_spa_shell_path_is_public() -> None:
@@ -161,7 +164,9 @@ def test_fixed_headers_ignored_when_feature_disabled() -> None:
         },
     )
     assert response.status_code == 401
-    assert response.json()["detail"] == "Missing or malformed Authorization header"
+    assert response.json()["detail"] == (
+        "Missing or malformed Authorization header"
+    )
 
 
 def test_bearer_takes_precedence_over_fixed_headers(
@@ -173,7 +178,9 @@ def test_bearer_takes_precedence_over_fixed_headers(
         del token
         raise jwt.PyJWTError("bad token")
 
-    monkeypatch.setattr(JWTAuthMiddleware, "_validate_bearer_token", _invalid_token)
+    monkeypatch.setattr(
+        JWTAuthMiddleware, "_validate_bearer_token", _invalid_token
+    )
 
     client = _client(
         _settings(
@@ -242,7 +249,7 @@ def test_settings_allow_custom_copilot_auth_timeout() -> None:
 
 def _self_signed_ca_pem() -> str:
     """Generate a throwaway self-signed CA certificate as PEM text."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
@@ -251,7 +258,7 @@ def _self_signed_ca_pem() -> str:
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)

@@ -72,7 +72,7 @@ def test_log_config_toml_is_applied(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("LOG_CONFIG", str(config))
+    monkeypatch.setenv("QM_LOG_CONFIG", str(config))
 
     configure_logging()
 
@@ -80,8 +80,8 @@ def test_log_config_toml_is_applied(
 
 
 def test_fallback_uses_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LOG_CONFIG", raising=False)
-    monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.delenv("QM_LOG_CONFIG", raising=False)
+    monkeypatch.setenv("QM_LOG_LEVEL", "WARNING")
 
     configure_logging()
 
@@ -91,8 +91,8 @@ def test_fallback_uses_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_bad_log_config_falls_back_without_raising(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("LOG_CONFIG", str(tmp_path / "does-not-exist.toml"))
-    monkeypatch.setenv("LOG_LEVEL", "ERROR")
+    monkeypatch.setenv("QM_LOG_CONFIG", str(tmp_path / "does-not-exist.toml"))
+    monkeypatch.setenv("QM_LOG_LEVEL", "ERROR")
 
     # Must not raise even though the config file is missing.
     configure_logging()

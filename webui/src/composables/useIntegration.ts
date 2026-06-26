@@ -17,7 +17,7 @@ export function useIntegration() {
     error.value = null
     try {
       info.value = await withLoading(
-        api.get<IntegrationInfo>('/api/integration'),
+        api.get<IntegrationInfo>('/api/integration')
       )
     } catch (err) {
       error.value =
@@ -29,10 +29,10 @@ export function useIntegration() {
 
   async function registerUserAgent(
     userAgent: string,
-    label: string,
+    label: string
   ): Promise<void> {
     await withLoading(
-      api.post('/api/clients', { user_agent: userAgent, label }),
+      api.post('/api/clients', { user_agent: userAgent, label })
     )
   }
 
