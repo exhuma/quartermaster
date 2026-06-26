@@ -761,6 +761,24 @@ def _evaluate_candidate(
 # ---------------------------------------------------------------------------
 
 
+def iter_catalog() -> list[tuple[KitInfo, KitApplicability]]:
+    """
+    Return all kits paired with their validated applicability metadata.
+
+    This is the public, additive accessor over :func:`_catalog_entries`
+    used by the server-side inference layer (``app.traits``) to derive
+    the trait vocabulary and per-trait pseudo-documents. Kits whose
+    manifest is missing or malformed are skipped (the same lenient
+    behaviour as the V2 selector), so a single bad manifest never aborts
+    discovery.
+
+    :returns: List of ``(KitInfo, KitApplicability)`` tuples sorted by
+        kit name.
+    """
+    entries, _warnings = _catalog_entries()
+    return entries
+
+
 def list_all_kits() -> list[KitInfo]:
     """
     Return metadata for all available instruction kits.

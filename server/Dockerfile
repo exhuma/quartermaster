@@ -47,7 +47,10 @@ COPY server/pyproject.toml server/uv.lock ./
 # UV_PROJECT_ENVIRONMENT must point to the final runtime path so script
 # shebangs (e.g. uvicorn) embed the correct interpreter path.
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
-RUN uv sync --frozen --no-dev --no-install-project
+# Include the `embeddings` extra so the shipped image can run the local
+# embedding inference for `resolve_kits`. Without it the server still works,
+# degrading to the deterministic lexical floor.
+RUN uv sync --frozen --no-dev --no-install-project --extra embeddings
 
 # ---------------------------------------------------------------------------
 # Stage 3 — runtime image
@@ -67,11 +70,15 @@ COPY --from=frontend /webui/dist /app/server/webui_dist
 # The kit catalog is supplied at runtime via a mounted volume. Create the
 # mount point and make /data writable by the non-root user so the WebDAV
 # authoring endpoint (later phase) and the client registry can write there.
-RUN mkdir -p /data/kits && chown -R appuser:appuser /data
+RUN mkdir -p /data/kits /data/embeddings && chown -R appuser:appuser /data
 ENV QM_KITS_ROOT=/data/kits
 ENV QM_CLIENT_REGISTRY_PATH=/data/client_registry.json
 ENV QM_APP_TOKENS_PATH=/data/app_tokens.json
 ENV QM_WEBUI_DIST=/app/server/webui_dist
+# Keep embedding model files + trait-embedding caches on the writable data
+# volume so they persist across restarts. The model (~130 MB) downloads on
+# the first `resolve_kits` call (one-time cold start), then is reused.
+ENV QM_EMBEDDINGS_CACHE_DIR=/data/embeddings
 
 WORKDIR /app/server
 

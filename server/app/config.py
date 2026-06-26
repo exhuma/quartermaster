@@ -18,6 +18,7 @@ _APP_TOKENS_DEFAULT = _SERVER_ROOT / "var" / "app_tokens.json"
 # Built web-UI assets. Empty/missing → the SPA is simply not served (the
 # API and MCP still work); the Docker image points this at the built dist.
 _WEBUI_DIST_DEFAULT = _SERVER_ROOT / "webui_dist"
+_EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
 
 
 class Settings(BaseSettings):
@@ -103,6 +104,27 @@ class Settings(BaseSettings):
         permission to create issues in ``github_owner/github_repo``.
     :param github_default_assignee: Optional default assignee username
         to attach to created issues.
+    :param embeddings_enabled: When true (default), the ``resolve_kits``
+        tool uses local embeddings to infer traits and rank sections.
+        Degrades to a lexical floor if the embedding dependency or model
+        is unavailable; set false for a slim, lexical-only deployment.
+    :param embeddings_model: Embedding model id loaded by the embedding
+        backend (default ``BAAI/bge-small-en-v1.5``).
+    :param embeddings_cache_dir: Directory for cached trait/section
+        embeddings, keyed by model id and catalog fingerprint.
+    :param embeddings_min_score: Minimum cosine similarity for a trait to
+        be inferred by the embedding engine.
+    :param embeddings_top_k_per_category: Maximum traits the embedding
+        engine emits per category.
+    :param llm_provider: Optional LLM backend selector for ``resolve_kits``
+        trait inference: ``"openai"`` (OpenAI-compatible endpoint) or
+        ``"anthropic"``. Unset disables the LLM layer entirely.
+    :param llm_base_url: Base URL for the OpenAI-compatible endpoint
+        (covers Ollama/vLLM/llama.cpp and cloud providers).
+    :param llm_model: Model id passed to the configured LLM backend.
+    :param llm_api_key: API key/token for the configured LLM backend.
+    :param llm_timeout_seconds: Per-request timeout for LLM calls; on
+        timeout the resolver falls back to embeddings, then lexical.
     """
 
     # All environment variables are prefixed with the application name
@@ -141,6 +163,21 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     github_token: str | None = None
     github_default_assignee: str | None = None
+    # Server-side inference for the one-shot ``resolve_kits`` tool. The
+    # embedding baseline is on by default but degrades to a lexical floor when
+    # the dependency/model is unavailable (so a slim deployment can set
+    # ``QM_EMBEDDINGS_ENABLED=false``). The pluggable LLM is off unless
+    # ``llm_provider`` and its required fields are set.
+    embeddings_enabled: bool = True
+    embeddings_model: str = "BAAI/bge-small-en-v1.5"
+    embeddings_cache_dir: Path = _EMBEDDINGS_CACHE_DEFAULT
+    embeddings_min_score: float = 0.30
+    embeddings_top_k_per_category: int = 4
+    llm_provider: str | None = None  # "openai" | "anthropic"
+    llm_base_url: str | None = None  # OpenAI-compatible base URL
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_timeout_seconds: float = 8.0
 
     @computed_field  # type: ignore[prop-decorator]
     @property

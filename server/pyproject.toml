@@ -17,6 +17,14 @@ dependencies = [
     "wsgidav>=4.3.4",
 ]
 
+[project.optional-dependencies]
+# Local-embedding inference for `resolve_kits` (ONNX, no torch). Optional:
+# without it the server degrades to the deterministic lexical floor. The
+# Docker image installs this extra and prefetches the model.
+embeddings = [
+    "fastembed>=0.4",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
@@ -26,6 +34,13 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# `slow` marks tests that load the real embedding model or hit a live LLM.
+# They are deselected by default; run them explicitly with `-m slow` (or
+# override with `-m ''`) in an environment where those backends are present.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: requires the real embedding model or a live LLM endpoint",
+]
 
 [tool.ruff]
 # 80-character limit per the module-code-style-python / stack-fastapi-vuetify

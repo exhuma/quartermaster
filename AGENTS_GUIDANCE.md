@@ -15,6 +15,13 @@ gives its agents so they drive Quartermaster well.
 > it, so the guidance can evolve server-side without every repo drifting out
 > of date.
 
+> **Default to the one-shot path.** Quartermaster exposes `resolve_kits`,
+> which takes a plain-language task and returns the matching kits with their
+> core sections already inlined — the whole discovery loop in a single call.
+> Agents should reach for it first; the manual `select_kits` loop below is the
+> fallback for when traits are already known or finer control is needed. We saw
+> agents skip `resolve_kits` when it was framed as optional, so lead with it.
+
 ## Why this guidance exists
 
 We observed a real failure mode: an agent asked Quartermaster for kits using
@@ -134,18 +141,23 @@ This project uses the Quartermaster MCP to load instruction kits **per task**,
 not as a fixed list. When a task may touch architecture, tooling, or a new
 capability:
 
-1. Treat Quartermaster's advertised trait vocabulary as the source of truth —
+1. **Default to `resolve_kits`** — pass a plain-language task description; it
+   maps the task to traits, ranks kits, and returns the recommendation with
+   each kit's `always_load` sections inlined. Pull anything under
+   `fetch_on_demand` with section-scoped `get_kit`. Use the steps below only
+   when traits are already known or you need finer control.
+2. Treat Quartermaster's advertised trait vocabulary as the source of truth —
    call `list_available_traits` and map the request onto supported
    `languages`, `frameworks`, `capabilities`, and `contexts`.
-2. Normalize free-form wording to that vocabulary before selecting (e.g.
+3. Normalize free-form wording to that vocabulary before selecting (e.g.
    "REST API on k8s with login" → framework `fastapi`, capabilities
    `rest-api`/`auth`, context `deploy`).
-3. Call `select_kits` with the normalized traits; if coverage is low or
+4. Call `select_kits` with the normalized traits; if coverage is low or
    `broadening_recommended` is set, broaden and retry with adjacent supported
    traits before deciding no kit applies.
-4. For the exact routine, fetch Quartermaster's trait-selection bootstrap
+5. For the exact routine, fetch Quartermaster's trait-selection bootstrap
    prompt (`list_prompts` → `get_prompt`) instead of duplicating it here.
-5. Prefer `get_kit_outline` and section-scoped `get_kit` over loading full
+6. Prefer `get_kit_outline` and section-scoped `get_kit` over loading full
    kits up front.
 ```
 
@@ -154,15 +166,19 @@ What each line of the explicit block is trying to achieve:
 - **"…load instruction kits per task, not as a fixed list."** Stops the agent
   pinning a stale kit list that loads too much or too little; traits often only
   emerge mid-conversation.
-- **Step 1 (source of truth).** Anchors every query to the advertised
+- **Step 1 (default to `resolve_kits`).** The one-shot path does the trait
+  mapping and selection server-side and returns core content inlined, so a
+  well-formed first call replaces the whole loop. Leading with it is what makes
+  agents actually use it instead of treating it as optional.
+- **Step 2 (source of truth).** Anchors every manual query to the advertised
   vocabulary so the agent stops inventing traits like `internal-service`.
-- **Step 2 (normalize).** Converts the user's natural language into trait
+- **Step 3 (normalize).** Converts the user's natural language into trait
   values that can actually match, which is where most weak queries are lost.
-- **Step 3 (broaden and retry).** Turns a low-coverage result into a second
+- **Step 4 (broaden and retry).** Turns a low-coverage result into a second
   attempt rather than a premature "no kit applies".
-- **Step 4 (fetch the prompt).** Keeps the authoritative routine in
+- **Step 5 (fetch the prompt).** Keeps the authoritative routine in
   Quartermaster — one source, free to evolve — instead of a copy that rots in
   every repo. It also references the registry generically, not a single
   hard-coded prompt name.
-- **Step 5 (outline first).** Defers the largest token cost until the agent
+- **Step 6 (outline first).** Defers the largest token cost until the agent
   is implementing that specific kit.
