@@ -60,6 +60,7 @@ from app.kits import (
     select_kits_v2,
 )
 from app.dav.webdav_app import mount_dav
+from app.mcp_logging import ToolCallAuditMiddleware
 from app.routers import app_tokens, clients, kits_admin, integration
 from app.storage.kit_writes import KitPathError
 from app.user_agent import UserAgentMiddleware
@@ -114,6 +115,9 @@ prefer per-task reflection.
 """
 
 mcp = FastMCP("quartermaster", instructions=MCP_INSTRUCTIONS)
+# Audit per-session tool-call sequences so engagement can be measured (see
+# app/mcp_logging.py). Registered here so it wraps every tool defined below.
+mcp.add_middleware(ToolCallAuditMiddleware())
 
 
 @mcp.tool
