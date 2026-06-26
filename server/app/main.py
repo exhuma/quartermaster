@@ -110,19 +110,25 @@ For each new task:
 1. **Discover coverage** — call `list_available_traits` for the trait
    vocabulary (languages, frameworks, capabilities, contexts) and `list_kits`
    for the available kits.
-2. **Map the task to traits** — infer which of those traits the task touches
-   from the repository and the developer's intent; revisit as the task's
-   direction firms up.
+2. **Map the task to traits** — this server's advertised vocabulary is
+   authoritative, so normalize the developer's wording onto supported
+   `languages`/`frameworks`/`capabilities`/`contexts` instead of inventing
+   trait names; infer which traits the task touches from the repository and
+   intent, and revisit as the direction firms up.
 3. **Load matching guidance** — call `select_kits` with the task's traits (use
-   `broaden=True` if `broadening_recommended` is set), narrow with
-   `explain_kit_candidate`, then load each chosen kit. Re-run this when new
-   traits come into scope mid-task.
+   `broaden=True` if `broadening_recommended` is set, and retry with adjacent
+   supported traits when coverage stays low — before concluding no kit
+   applies), narrow with `explain_kit_candidate`, then load each chosen kit.
+   Re-run this when new traits come into scope mid-task.
 4. **Load lean** — call `get_kit_outline` to see a kit's sections, then
    `get_kit` with `sections=[…]` to pull only the sections the current step
    needs (start with the ones flagged `always_load`). Read a kit's full text
    (omit `sections`) only when you're implementing all of it. For tasks that
    touch several kits, load each kit's content when you reach that aspect, not
    all up front.
+
+For a compact, operational version of this trait-selection routine, fetch the
+bootstrap prompt from the prompt registry (`list_prompts` → `get_prompt`).
 """
 
 # Appended only when the GitHub-backed gap-request tools are registered (i.e.

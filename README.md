@@ -118,6 +118,17 @@ The server ships this workflow as MCP-level `instructions`, so compliant
 clients surface it automatically on connect. Hard-coding kits is acceptable
 only when a project's relevant kits are genuinely stable.
 
+A recurring failure mode is querying with generic or invented traits (`auth`,
+`internal-service`, or `kubernetes` as a *context*) that miss the published
+vocabulary, so a relevant kit scores poorly and the agent wrongly concludes
+nothing applies. Two server-side surfaces steer agents past this at minimal
+token cost: a one-line normalization invariant baked into the MCP
+`instructions`, and an evolvable **`trait_selection_bootstrap`** prompt (fetch
+via `list_prompts` → `get_prompt`) holding the compact operational routine. For
+the recommended `AGENTS.md` block to put in a Quartermaster-backed repo — and
+the rationale behind each line — see
+[AGENTS_GUIDANCE.md](AGENTS_GUIDANCE.md).
+
 ### Architecture
 
 ```

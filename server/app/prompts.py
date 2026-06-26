@@ -4,6 +4,38 @@ from __future__ import annotations
 
 _PROMPTS: list[dict[str, str]] = [
     {
+        "name": "trait_selection_bootstrap",
+        "title": "Quartermaster Trait-Selection Bootstrap",
+        "intent": (
+            "How to drive Quartermaster's own trait-selection workflow "
+            "efficiently and correctly. This is guidance for *using* "
+            "Quartermaster to find kits — not implementation work on the "
+            "target project."
+        ),
+        "prompt_template": (
+            "Use this routine when selecting Quartermaster kits for a task:\n"
+            "1. Treat Quartermaster's advertised trait vocabulary as "
+            "authoritative — only supported `languages`, `frameworks`, "
+            "`capabilities`, and `contexts` match; invented trait names do "
+            "not.\n"
+            "2. Normalize the user's wording to that vocabulary before "
+            'selecting (e.g. "REST API" -> framework `fastapi` + capability '
+            '`rest-api`; "k8s"/"deploy target" -> context `deploy`; '
+            '"logging" -> `observability`/`correlation-id`; "audit" -> '
+            "`security`).\n"
+            "3. Call `list_available_traits` whenever the request introduces "
+            "a new runtime, deployment, or capability concern you have not "
+            "already mapped.\n"
+            "4. Call `select_kits` with the normalized traits.\n"
+            "5. If coverage is low or `broadening_recommended` is set, "
+            "broaden and retry with adjacent supported traits before "
+            "concluding that no relevant kit exists.\n"
+            "6. Prefer prompt and outline discovery "
+            "(`list_prompts`/`get_prompt`, `get_kit_outline`, "
+            "section-scoped `get_kit`) over loading full kit content."
+        ),
+    },
+    {
         "name": "legacy_assessment",
         "title": "Legacy Project Diagnostic",
         "intent": (
