@@ -8,10 +8,12 @@ Outer FastAPI application that:
   VS Code can discover the Keycloak authorization server automatically.
 - Mounts a FastMCP streamable-HTTP endpoint at ``/kits/mcp`` with V2
     discovery + content tools: ``list_kits``, ``list_available_traits``,
-    ``list_prompts``, ``get_prompt``, ``check_existing_gap_issue``,
-    ``request_clarification_or_addition``, ``select_kits``,
+    ``list_prompts``, ``get_prompt``, ``select_kits``,
     ``explain_kit_candidate``, ``get_kit``, ``list_kit_versions``,
-    and ``compare_kit_versions``.  The mount also ships server-level
+    and ``compare_kit_versions``.  The GitHub-backed gap tools
+    ``check_existing_gap_issue`` / ``request_clarification_or_addition``
+    are registered only when GitHub is configured.  The mount also ships
+    server-level
     ``instructions`` (see :data:`MCP_INSTRUCTIONS`) describing the
     intended per-task trait-reflection workflow; clients receive it in
     the MCP ``initialize`` response.
@@ -31,14 +33,17 @@ from __future__ import annotations
 import logging
 import os
 
-from gouge.colourcli import Simple
+from app.logging_config import configure_logging
 
-Simple.basicConfig(level=logging.DEBUG)
-logging.getLogger("sse_starlette").setLevel(logging.INFO)
+# Configure logging before importing modules that grab loggers, so import-time
+# records are formatted. Operators control this via LOG_CONFIG / LOG_LEVEL
+# (see app/logging_config.py) without rebuilding the image.
+configure_logging()
 
 from fastmcp import FastMCP
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +81,7 @@ from app.requests import request_kit_extension as _request_kit_extension
 # MCP server
 # ---------------------------------------------------------------------------
 
-MCP_INSTRUCTIONS = """\
+_INSTRUCTIONS_BODY = """\
 This MCP serves versioned AI *instruction kits* — agent-facing guidance for
 specific architecture, tooling, and capability choices (for example: local
 auth, OIDC, a FastAPI + Vuetify stack). Kits are loaded on demand as extra
@@ -107,12 +112,55 @@ For each new task:
    (omit `sections`) only when you're implementing all of it. For tasks that
    touch several kits, load each kit's content when you reach that aspect, not
    all up front.
-
-If the task needs a capability no kit covers, call `check_existing_gap_issue`
-and then `request_clarification_or_addition` to file a gap. Hard-coding kits is
-acceptable only when a project's relevant kits are genuinely stable; otherwise
-prefer per-task reflection.
 """
+
+# Appended only when the GitHub-backed gap-request tools are registered (i.e.
+# GitHub is configured). When they are not, the agent must not be told to call
+# tools that do not exist.
+_INSTRUCTIONS_GAP_SENTENCE = (
+    "If the task needs a capability no kit covers, call "
+    "`check_existing_gap_issue` and then `request_clarification_or_addition` "
+    "to file a gap. "
+)
+_INSTRUCTIONS_HARDCODE_SENTENCE = (
+    "Hard-coding kits is acceptable only when a project's relevant kits are "
+    "genuinely stable; otherwise prefer per-task reflection."
+)
+
+
+def _build_mcp_instructions(*, github_enabled: bool) -> str:
+    """Assemble the server-level MCP instructions.
+
+    The gap-filing sentence is included only when *github_enabled* is true, so
+    the instructions never reference tools that are not registered.
+    """
+    closing = _INSTRUCTIONS_HARDCODE_SENTENCE
+    if github_enabled:
+        closing = _INSTRUCTIONS_GAP_SENTENCE + closing
+    return f"{_INSTRUCTIONS_BODY}\n{closing}\n"
+
+
+def _github_issue_tools_enabled() -> bool:
+    """Return whether GitHub issue materialization is fully configured.
+
+    Reads the same source as :func:`app.requests._require_github_issue_config`
+    (settings, which also honor ``.env``), but tolerates an incompletely
+    configured environment so it is safe to call at import time: when required
+    Keycloak settings are absent (e.g. during test collection) the GitHub tools
+    are simply treated as disabled.
+    """
+    try:
+        settings = get_settings()
+    except ValidationError:
+        return False
+    return all(
+        (getattr(settings, name) or "").strip()
+        for name in ("github_owner", "github_repo", "github_token")
+    )
+
+
+_GITHUB_TOOLS_ENABLED = _github_issue_tools_enabled()
+MCP_INSTRUCTIONS = _build_mcp_instructions(github_enabled=_GITHUB_TOOLS_ENABLED)
 
 mcp = FastMCP("quartermaster", instructions=MCP_INSTRUCTIONS)
 # Audit per-session tool-call sequences so engagement can be measured (see
@@ -174,7 +222,10 @@ def get_prompt(name: str) -> dict:
         raise ValueError(f"Prompt not found: {name!r}") from exc
 
 
-@mcp.tool
+# GitHub-backed tools. Defined unconditionally but only registered with the
+# MCP when GitHub is configured (see the registration block below), so a
+# self-hosted instance with no GitHub credentials never exposes — or reaches
+# out to — GitHub at all.
 def check_existing_gap_issue(
     title: str,
     summary: str,
@@ -206,7 +257,6 @@ def check_existing_gap_issue(
     )
 
 
-@mcp.tool
 def request_clarification_or_addition(
     title: str,
     summary: str,
@@ -239,6 +289,14 @@ def request_clarification_or_addition(
         missing_tools=missing_tools,
         details=details,
     )
+
+
+# Only expose the GitHub-backed tools when GitHub is configured. Otherwise they
+# are not registered at all — the agent never sees them and the server makes no
+# outbound GitHub calls (suitable for fully self-hosted / air-gapped installs).
+if _GITHUB_TOOLS_ENABLED:
+    mcp.tool(check_existing_gap_issue)
+    mcp.tool(request_clarification_or_addition)
 
 
 @mcp.tool

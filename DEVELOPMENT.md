@@ -71,6 +71,67 @@ uv run pytest
 > The real-catalog tests resolve the catalog from `KITS_ROOT` and skip when
 > it is absent, so they pass even against an empty/decoupled checkout.
 
+## Optional GitHub integration
+
+The only part of the server that makes outbound calls to GitHub is the pair of
+gap-request MCP tools (`check_existing_gap_issue` and
+`request_clarification_or_addition`), which materialize kit-extension requests
+as GitHub issues. They are registered — and therefore visible to coding
+agents — **only when `GITHUB_OWNER`, `GITHUB_REPO`, and `GITHUB_TOKEN` are all
+set**. Leave them unset for a fully self-hosted / air-gapped install: the tools
+are not exposed at all, the server never reaches out to GitHub, and the MCP
+instructions automatically omit the gap-filing step. Everything else (kit
+discovery, selection, and loading) works unchanged.
+
+## Logging
+
+Logging is configured at startup from the environment, so logs can be
+redirected to disk, logstash, syslog, or a custom HTTP endpoint **without
+rebuilding the image** — mount a config file and set an env var.
+
+- `LOG_LEVEL` — level for the default colored console output (used only when
+  `LOG_CONFIG` is unset). Defaults to `INFO`.
+- `LOG_CONFIG` — path to a **TOML** file holding a standard
+  [`logging.config.dictConfig`](https://docs.python.org/3/library/logging.config.html#logging-config-dictschema)
+  schema. When set, it takes full control of logging.
+
+Set `disable_existing_loggers = false` so the uvicorn/app loggers survive. The
+stdlib ships no JSON formatter, so a JSON-lines formatter is bundled at
+`app.logging_config.JsonLinesFormatter` — reference it via dictConfig's `()`
+factory key. Example writing one JSON object per line to a rotating file:
+
+```toml
+# logging.toml — mount it and set LOG_CONFIG=/data/logging.toml
+version = 1
+disable_existing_loggers = false
+
+[formatters.jsonlines]
+"()" = "app.logging_config.JsonLinesFormatter"
+
+[handlers.file]
+class = "logging.handlers.RotatingFileHandler"
+formatter = "jsonlines"
+filename = "/var/log/quartermaster/app.log"
+maxBytes = 10485760      # 10 MiB per file
+backupCount = 5
+
+[root]
+level = "INFO"
+handlers = ["file"]
+```
+
+Each line in `app.log` is then a single JSON object, e.g.:
+
+```json
+{"ts": "2026-06-26T10:15:00+0000", "level": "INFO", "logger": "app.mcp_audit", "message": "mcp_audit event=initialize session=… client=…"}
+```
+
+The log directory must exist and be writable (mount it into the container).
+Other stdlib handlers work the same way — `SocketHandler` for logstash,
+`SysLogHandler` for syslog, `HTTPHandler` for a custom endpoint. (An
+OpenTelemetry handler needs its package baked into a derived image and is out
+of scope for the stock image.)
+
 ## Web UI (SPA)
 
 There are two ways to run the UI. Use **A** for active UI work (hot
