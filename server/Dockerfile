@@ -47,10 +47,19 @@ COPY server/pyproject.toml server/uv.lock ./
 # UV_PROJECT_ENVIRONMENT must point to the final runtime path so script
 # shebangs (e.g. uvicorn) embed the correct interpreter path.
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
-# Include the `embeddings` extra so the shipped image can run the local
-# embedding inference for `resolve_kits`. Without it the server still works,
-# degrading to the deterministic lexical floor.
-RUN uv sync --frozen --no-dev --no-install-project --extra embeddings
+# Include the `embeddings` extra (local trait inference for `resolve_kits`) and
+# the `telemetry` extra (OpenTelemetry metrics/traces + tiktoken token sizing).
+# Both are optional at runtime — without them the server degrades gracefully
+# (lexical floor; no-op telemetry with bytes/4 token estimates).
+RUN uv sync --frozen --no-dev --no-install-project \
+    --extra embeddings --extra telemetry
+
+# Pre-seed tiktoken's cl100k_base vocabulary into a baked cache so token
+# counting works offline (air-gapped installs). TIKTOKEN_CACHE_DIR points the
+# runtime at the same path.
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
+RUN /app/.venv/bin/python -c \
+    "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 # ---------------------------------------------------------------------------
 # Stage 3 — runtime image
@@ -62,6 +71,10 @@ RUN useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin appuser
 
 # Copy the pre-built virtual environment from the builder stage.
 COPY --from=builder /app/.venv /app/.venv
+
+# Copy the pre-seeded tiktoken vocabulary so token counting runs offline.
+COPY --from=builder /app/tiktoken_cache /app/tiktoken_cache
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 
 # Copy the application package and the built web UI — no kit content.
 COPY server/app/ /app/server/app/

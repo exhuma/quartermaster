@@ -29,6 +29,8 @@ from typing import Any
 
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
 
+from app import telemetry
+
 logger = logging.getLogger("app.mcp_audit")
 
 
@@ -90,29 +92,43 @@ class ToolCallAuditMiddleware(Middleware):
         context: MiddlewareContext,
         call_next: Callable[[MiddlewareContext], Awaitable[Any]],
     ) -> Any:
-        """Emit a tool-call record (name + per-session seq + outcome)."""
+        """Emit a tool-call record (name + per-session seq + outcome).
+
+        Also opens a ``mcp.tool.<name>`` span around the call and records the
+        ``qm.tool.duration``/``qm.tool.calls`` metrics (see app/telemetry.py).
+        Telemetry, like logging, must never break the tool call.
+        """
         ctx = context.fastmcp_context
         session_id = _safe_attr(ctx, "session_id")
         tool_name = _safe_attr(context.message, "name")
         seq = self._next_seq(session_id)
         started = time.perf_counter()
         ok = True
-        try:
-            return await call_next(context)
-        except Exception:
-            ok = False
-            raise
-        finally:
+        with telemetry.span(
+            f"mcp.tool.{tool_name or 'unknown'}",
+            {"mcp.tool.name": tool_name, "mcp.session.id": session_id},
+        ):
             try:
-                logger.info(
-                    "mcp_audit event=tool_call session=%s seq=%d client=%s "
-                    "tool=%s ok=%s duration_ms=%.1f",
-                    session_id,
-                    seq,
-                    _safe_attr(ctx, "client_id"),
-                    tool_name,
-                    ok,
-                    (time.perf_counter() - started) * 1000.0,
-                )
-            except Exception:  # pragma: no cover - logging must not break
-                pass
+                return await call_next(context)
+            except Exception:
+                ok = False
+                raise
+            finally:
+                duration_ms = (time.perf_counter() - started) * 1000.0
+                try:
+                    telemetry.record_tool_call(tool_name, ok, duration_ms)
+                except Exception:  # pragma: no cover - telemetry never breaks
+                    pass
+                try:
+                    logger.info(
+                        "mcp_audit event=tool_call session=%s seq=%d "
+                        "client=%s tool=%s ok=%s duration_ms=%.1f",
+                        session_id,
+                        seq,
+                        _safe_attr(ctx, "client_id"),
+                        tool_name,
+                        ok,
+                        duration_ms,
+                    )
+                except Exception:  # pragma: no cover - logging must not break
+                    pass

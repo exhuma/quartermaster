@@ -125,6 +125,18 @@ class Settings(BaseSettings):
     :param llm_api_key: API key/token for the configured LLM backend.
     :param llm_timeout_seconds: Per-request timeout for LLM calls; on
         timeout the resolver falls back to embeddings, then lexical.
+    :param metrics_prometheus_enabled: When true, mount a ``GET /metrics``
+        Prometheus pull endpoint (requires the ``telemetry`` extra). OTLP
+        push is configured separately via the standard ``OTEL_*`` env vars
+        and needs no Quartermaster toggle. Default false.
+    :param metrics_allow_anonymous: When false (default), the ``/metrics``
+        endpoint requires app-token HTTP Basic auth (the same token used for
+        ``/dav``; Prometheus supports this via ``basic_auth``). Set true only
+        when ``/metrics`` is isolated at the network layer (internal
+        interface, firewall, or reverse-proxy auth).
+    :param metrics_section_level: When true, emit per-section delivery metrics
+        (``qm.section.deliveries``). Off by default to bound metric
+        cardinality on large catalogs.
     """
 
     # All environment variables are prefixed with the application name
@@ -178,6 +190,12 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     llm_api_key: str | None = None
     llm_timeout_seconds: float = 8.0
+    # Observability (OpenTelemetry metrics + traces). OTLP push is driven by
+    # the standard OTEL_* env vars read by the SDK directly; only the
+    # Prometheus pull endpoint and its auth posture are Quartermaster toggles.
+    metrics_prometheus_enabled: bool = False
+    metrics_allow_anonymous: bool = False
+    metrics_section_level: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property

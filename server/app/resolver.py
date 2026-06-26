@@ -22,7 +22,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app import telemetry
 from app.kits import read_kit, select_kits_v2
+from app.tokens import count_tokens, estimate_tokens_from_bytes
 from app.traits import (
     SectionRef,
     TraitVocabulary,
@@ -278,56 +280,126 @@ def resolve_kits(
     if not task:
         raise ValueError("task must not be empty")
 
-    vocab = load_vocabulary()
-    engine, inferred = _infer(task, vocab)
+    with telemetry.span("resolve.infer") as infer_span:
+        vocab = load_vocabulary()
+        engine, inferred = _infer(task, vocab)
+        telemetry.set_attrs(
+            infer_span,
+            {
+                "engine": inferred.engine,
+                "trait.count": len(inferred.provenance),
+            },
+        )
 
-    selection = select_kits_v2(
-        languages=inferred.languages,
-        frameworks=inferred.frameworks,
-        capabilities=inferred.capabilities,
-        contexts=inferred.contexts,
-        broaden=broaden,
-        limit=limit,
-    )
+    with telemetry.span("resolve.select") as select_span:
+        selection = select_kits_v2(
+            languages=inferred.languages,
+            frameworks=inferred.frameworks,
+            capabilities=inferred.capabilities,
+            contexts=inferred.contexts,
+            broaden=broaden,
+            limit=limit,
+        )
+        telemetry.set_attrs(
+            select_span,
+            {
+                "candidates": len(selection["candidates"]),
+                "confidence": selection["confidence"],
+                "coverage": selection["coverage"],
+            },
+        )
 
     kits_out: list[dict[str, Any]] = []
-    for candidate in selection["candidates"]:
-        name = candidate["name"]
-        refs = build_section_refs([name])
-        version = refs[0].version if refs else candidate["latest_version"]
-        always = [r for r in refs if r.always_load]
-        rest = [r for r in refs if not r.always_load]
+    total_delivered = 0
+    total_offered = 0
+    with telemetry.span("resolve.assemble") as assemble_span:
+        for candidate in selection["candidates"]:
+            name = candidate["name"]
+            refs = build_section_refs([name])
+            version = refs[0].version if refs else candidate["latest_version"]
+            always = [r for r in refs if r.always_load]
+            rest = [r for r in refs if not r.always_load]
 
-        ranked = engine.rank_sections(task, rest)
-        relevance_by_id = {r.section_id: score for r, score in ranked}
-        relevant = [
-            (r, score) for r, score in ranked if score > 0
-        ][:max_sections_per_kit]
+            ranked = engine.rank_sections(task, rest)
+            relevance_by_id = {r.section_id: score for r, score in ranked}
+            relevant = [
+                (r, score) for r, score in ranked if score > 0
+            ][:max_sections_per_kit]
 
-        descriptors = [
-            _section_descriptor(r, relevance_by_id.get(r.section_id, 0.0))
-            for r in always
-        ]
-        descriptors += [_section_descriptor(r, score) for r, score in relevant]
+            descriptors = [
+                _section_descriptor(r, relevance_by_id.get(r.section_id, 0.0))
+                for r in always
+            ]
+            descriptors += [
+                _section_descriptor(r, score) for r, score in relevant
+            ]
 
-        always_ids = [r.section_id for r in always]
-        markdown = (
-            read_kit(name, version, sections=always_ids) if always_ids else ""
-        )
+            always_ids = [r.section_id for r in always]
+            markdown = (
+                read_kit(name, version, sections=always_ids)
+                if always_ids
+                else ""
+            )
 
-        kits_out.append(
+            offered_ids = [r.section_id for r, _ in relevant]
+            delivered_tokens = count_tokens(markdown) if markdown else 0
+            # Offered sections are not read here (they are fetched on demand),
+            # so size them from the known byte counts rather than re-reading.
+            offered_tokens = sum(
+                estimate_tokens_from_bytes(r.bytes) for r, _ in relevant
+            )
+            total_delivered += delivered_tokens
+            total_offered += offered_tokens
+            telemetry.record_kit_delivery(
+                kit=name,
+                disposition="inlined",
+                tokens=delivered_tokens,
+                section_ids=always_ids,
+            )
+            if offered_ids:
+                telemetry.record_kit_delivery(
+                    kit=name,
+                    disposition="offered",
+                    tokens=offered_tokens,
+                    section_ids=offered_ids,
+                )
+
+            kits_out.append(
+                {
+                    "name": name,
+                    "version": version,
+                    "score": candidate["score"],
+                    "confidence": candidate["confidence"],
+                    "reasons": candidate["reasons"],
+                    "summary": candidate["summary"],
+                    "sections": descriptors,
+                    "always_load_markdown": markdown,
+                    "fetch_on_demand": offered_ids,
+                }
+            )
+        telemetry.set_attrs(
+            assemble_span,
             {
-                "name": name,
-                "version": version,
-                "score": candidate["score"],
-                "confidence": candidate["confidence"],
-                "reasons": candidate["reasons"],
-                "summary": candidate["summary"],
-                "sections": descriptors,
-                "always_load_markdown": markdown,
-                "fetch_on_demand": [r.section_id for r, _ in relevant],
-            }
+                "kits": len(kits_out),
+                "delivered_tokens": total_delivered,
+                "offered_tokens": total_offered,
+            },
         )
+
+    telemetry.record_resolve(
+        engine=inferred.engine,
+        confidence=selection["confidence"],
+        coverage=selection["coverage"],
+        broadening_recommended=selection["broadening_recommended"],
+        delivered_tokens=total_delivered,
+        offered_tokens=total_offered,
+        traits={
+            "languages": inferred.languages,
+            "frameworks": inferred.frameworks,
+            "capabilities": inferred.capabilities,
+            "contexts": inferred.contexts,
+        },
+    )
 
     return {
         "engine": inferred.engine,

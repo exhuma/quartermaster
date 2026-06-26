@@ -567,6 +567,9 @@ to `.env`, but the table below is the authoritative reference.
 | `QM_DEV_SHARED_SECRET` | No | **Dev only — never set in production.** HS256 signing secret for dev tokens. | unset (HS256 rejected) |
 | `QM_LOG_LEVEL` | No | Console log level when `QM_LOG_CONFIG` is unset. | `INFO` |
 | `QM_LOG_CONFIG` | No | Path to a TOML `dictConfig` file for full logging control. | unset (colored console) |
+| `QM_METRICS_PROMETHEUS_ENABLED` | No | Mount a Prometheus `GET /metrics` pull endpoint (needs the `telemetry` extra). OTLP push uses the standard `OTEL_*` env vars. See [OBSERVABILITY.md](OBSERVABILITY.md). | `false` |
+| `QM_METRICS_ALLOW_ANONYMOUS` | No | Serve `/metrics` without auth. When false it requires app-token Basic (the `/dav` token); set true only when isolated at the network layer. | `false` |
+| `QM_METRICS_SECTION_LEVEL` | No | Emit per-section delivery metrics (`qm.section.deliveries`); higher cardinality. | `false` |
 
 \* `QM_KITS_ROOT` is optional only because the Docker image defaults it to
 `/data/kits`; the server needs a kit catalog at that path to serve anything.

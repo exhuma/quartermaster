@@ -24,6 +24,18 @@ dependencies = [
 embeddings = [
     "fastembed>=0.4",
 ]
+# OpenTelemetry metrics + traces and tiktoken token counting (see
+# docs/observability.md). Optional: without it the instrumentation code is
+# inert (no-op tracer, in-process no-op metrics) and token sizes fall back to
+# a bytes/4 estimate. The Docker image installs this extra and pre-seeds the
+# tiktoken vocab for offline use.
+telemetry = [
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-exporter-prometheus>=0.48b0",
+    "prometheus-client>=0.20",
+    "tiktoken>=0.7",
+]
 
 [dependency-groups]
 dev = [

@@ -43,7 +43,7 @@ from app.logging_config import configure_logging
 # (see app/logging_config.py) without rebuilding the image.
 configure_logging()
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastmcp import FastMCP
 from pydantic import ValidationError
@@ -51,6 +51,7 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 from app import health as health_probes
+from app import telemetry
 from app.auth import JWTAuthMiddleware
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
@@ -86,6 +87,7 @@ from app.requests import request_kit_extension as _request_kit_extension
 from app.resolver import resolve_kits as _resolve_kits
 from app.routers import app_tokens, clients, integration, kits_admin
 from app.storage.kit_writes import KitPathError
+from app.tokens import count_tokens
 from app.user_agent import UserAgentMiddleware
 from app.webui import mount_webui
 
@@ -312,6 +314,7 @@ def request_clarification_or_addition(
     :raises ValueError: If required fields are empty or GitHub
         issue creation fails.
     """
+    telemetry.record_gap_request()
     return _request_kit_extension(
         title=title,
         summary=summary,
@@ -495,13 +498,20 @@ def get_kit(
         *version* is not available, or if a section id is unknown.
     """
     try:
-        return read_kit(name, version, sections)
+        markdown = read_kit(name, version, sections)
     except KitNotFoundError as exc:
         raise ValueError(str(exc)) from exc
     except KitVersionNotFoundError as exc:
         raise ValueError(str(exc)) from exc
     except KitSectionNotFoundError as exc:
         raise ValueError(str(exc)) from exc
+    telemetry.record_kit_delivery(
+        kit=name,
+        disposition="sections" if sections else "full",
+        tokens=count_tokens(markdown),
+        section_ids=sections or [],
+    )
+    return markdown
 
 
 @mcp.tool
@@ -592,6 +602,22 @@ async def health() -> dict:
     :returns: ``{"status": "ok"}``
     """
     return {"status": "ok"}
+
+
+async def metrics_endpoint() -> Response:
+    """
+    Prometheus pull endpoint.
+
+    Serves the OpenTelemetry metrics in Prometheus exposition format. Mounted
+    only when ``QM_METRICS_PROMETHEUS_ENABLED`` is set and the Prometheus
+    reader is available. Secured by app-token HTTP Basic in
+    :class:`~app.auth.JWTAuthMiddleware` unless ``QM_METRICS_ALLOW_ANONYMOUS``
+    is set.
+
+    :returns: Prometheus exposition response.
+    """
+    payload, content_type = telemetry.prometheus_exposition()
+    return Response(content=payload, media_type=content_type)
 
 
 async def oauth_protected_resource_metadata() -> JSONResponse:
@@ -737,6 +763,20 @@ def create_app() -> FastAPI:
 
     :returns: Fully assembled FastAPI application.
     """
+    # Configure OpenTelemetry metrics + traces once. Tolerant of an
+    # incompletely configured environment (e.g. during test collection),
+    # mirroring _github_issue_tools_enabled.
+    serve_metrics = False
+    try:
+        settings = get_settings()
+        telemetry.init_telemetry(settings)
+        serve_metrics = (
+            settings.metrics_prometheus_enabled
+            and telemetry.prometheus_enabled()
+        )
+    except ValidationError:
+        pass
+
     mcp_app = mcp.http_app(path="/mcp")
     # Swagger docs are enabled so the vendor media-type contract is
     # discoverable. They sit behind the auth + User-Agent middleware like
@@ -805,6 +845,15 @@ def create_app() -> FastAPI:
     # enforced by JWTAuthMiddleware). Writes land on kits_root and are
     # visible to the MCP immediately (kit reads are uncached).
     mount_dav(application)
+
+    # Prometheus pull endpoint. Mounted only when this app enables it and the
+    # reader installed (the telemetry extra is present). Added before the SPA
+    # fallback so it is never shadowed; secured (or left anonymous) by
+    # JWTAuthMiddleware per QM_METRICS_ALLOW_ANONYMOUS.
+    if serve_metrics:
+        application.add_api_route(
+            "/metrics", metrics_endpoint, methods=["GET"]
+        )
 
     # Serve the built SPA + /config.js (no-op when there is no build). The
     # SPA fallback route is added last so it never shadows /api, /kits, the

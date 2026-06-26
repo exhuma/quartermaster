@@ -104,6 +104,7 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 # an OIDC browser flow.
 _PROTECTED_PREFIXES: tuple[str, ...] = ("/api", "/kits", "/dav")
 _DAV_PREFIX = "/dav"
+_METRICS_PATH = "/metrics"
 
 
 def _requires_auth(path: str) -> bool:
@@ -198,6 +199,18 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             request.url.path,
             request.client.host if request.client else "unknown",
         )
+
+        # The Prometheus pull endpoint is authenticated with app-token Basic
+        # (Prometheus cannot run an OIDC browser flow) unless the operator
+        # isolates it at the network layer via QM_METRICS_ALLOW_ANONYMOUS.
+        # When the endpoint is not mounted, fall through so it 404s normally.
+        if request.url.path == _METRICS_PATH:
+            if (
+                not self._settings.metrics_prometheus_enabled
+                or self._settings.metrics_allow_anonymous
+            ):
+                return await call_next(request)
+            return await self._handle_metrics(request, call_next)
 
         if not _requires_auth(request.url.path):
             logger.debug("Public path, skipping auth: %s", request.url.path)
@@ -305,17 +318,50 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 status_code=403,
                 content={"detail": "WebDAV requires HTTPS."},
             )
+        record = self._verify_basic_app_token(request)
+        if record:
+            request.state.auth_subject = record["user"]
+            return await call_next(request)
+        return self._basic_unauthorized()
+
+    async def _handle_metrics(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """
+        Authenticate a ``/metrics`` request via HTTP Basic + app token.
+
+        Uses the same per-user app tokens as ``/dav`` so a Prometheus scraper
+        can authenticate via ``basic_auth``. Operators who would rather scrape
+        over plain HTTP on an internal network can instead set
+        ``QM_METRICS_ALLOW_ANONYMOUS`` (handled in ``dispatch``).
+
+        :param request: Incoming scrape request.
+        :param call_next: Downstream metrics handler.
+        :returns: The downstream response, or ``401``.
+        """
+        record = self._verify_basic_app_token(request)
+        if record:
+            request.state.auth_subject = record["user"]
+            return await call_next(request)
+        return self._basic_unauthorized()
+
+    def _verify_basic_app_token(self, request: Request) -> dict | None:
+        """
+        Return the app-token record for a Basic ``Authorization`` header.
+
+        :param request: Incoming request.
+        :returns: The token record, or ``None`` when absent/invalid.
+        """
         header = request.headers.get("Authorization", "")
         if header.lower().startswith("basic "):
             token = self._basic_app_token(header)
             if token is not None:
-                record = app_tokens.verify(
+                return app_tokens.verify(
                     self._settings.app_tokens_path, token
                 )
-                if record:
-                    request.state.auth_subject = record["user"]
-                    return await call_next(request)
-        return self._basic_unauthorized()
+        return None
 
     @staticmethod
     def _basic_app_token(header: str) -> str | None:

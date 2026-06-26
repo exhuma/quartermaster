@@ -273,3 +273,17 @@ configuration and never fails, so `resolve_kits` always returns a result.
 - **No outbound calls unless you ask for them:** with `QM_LLM_PROVIDER` unset
   and the model pre-seeded, the server makes no inference-related network
   calls — suitable for air-gapped installs.
+
+---
+
+## 9. Observability (metrics + traces)
+
+Quartermaster can emit OpenTelemetry **metrics and traces** that measure how
+much kit content it delivers, which kits/sections get used, and how the catalog
+grows over time. Push to any OTLP collector via the standard `OTEL_*` env vars,
+or scrape Prometheus via `QM_METRICS_PROMETHEUS_ENABLED` (auth: app-token Basic
+by default, or `QM_METRICS_ALLOW_ANONYMOUS` behind network isolation). With
+nothing configured the layer is inert.
+
+See **[OBSERVABILITY.md](OBSERVABILITY.md)** for the full metric reference, KPI
+recipes (PromQL), a suggested Grafana dashboard, and the trace span tree.
