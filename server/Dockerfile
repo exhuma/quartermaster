@@ -64,8 +64,10 @@ RUN /app/.venv/bin/python -c \
 # Install the project package itself (after deps, to keep the uv sync layer
 # cached). This creates the .dist-info so importlib.metadata.version("quartermaster")
 # resolves correctly at runtime instead of falling back to "0.0.0".
+# `uv pip` does not honour UV_PROJECT_ENVIRONMENT (that is for `uv sync`/`uv run`),
+# so point it at the venv explicitly.
 COPY server/app/ ./app/
-RUN uv pip install --no-deps .
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
 
 # ---------------------------------------------------------------------------
 # Stage 3 — runtime image

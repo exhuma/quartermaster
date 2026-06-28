@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "quartermaster"
 version = "0.1.0"
@@ -43,6 +47,15 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+
+# Scope wheel discovery to the app package explicitly. Auto-discovery would
+# otherwise trip over sibling dirs (e.g. a local `var/`) under a flat layout;
+# pinning to `app*` keeps the build deterministic — it exists so the install
+# in Dockerfile produces `quartermaster-*.dist-info`, letting
+# importlib.metadata.version("quartermaster") report the real OTEL
+# service.version instead of the "0.0.0" fallback.
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
