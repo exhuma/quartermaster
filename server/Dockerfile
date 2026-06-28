@@ -61,6 +61,12 @@ ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 RUN /app/.venv/bin/python -c \
     "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
+# Install the project package itself (after deps, to keep the uv sync layer
+# cached). This creates the .dist-info so importlib.metadata.version("quartermaster")
+# resolves correctly at runtime instead of falling back to "0.0.0".
+COPY server/app/ ./app/
+RUN uv pip install --no-deps .
+
 # ---------------------------------------------------------------------------
 # Stage 3 — runtime image
 # ---------------------------------------------------------------------------

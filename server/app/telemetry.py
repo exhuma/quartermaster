@@ -47,7 +47,20 @@ logger = logging.getLogger(__name__)
 
 try:
     from opentelemetry import metrics, trace
+
+    # The logs signal lives under ``_logs`` (note the underscore) — unlike
+    # metrics/traces it is not yet declared stable, so OTel keeps it in a
+    # private-namespaced module as a "this API may still change" marker. These
+    # are the documented public symbols (listed in ``opentelemetry._logs.
+    # __all__``); there is no non-underscore alias to import instead. If a
+    # future OTel release graduates logs, this import moves — the surrounding
+    # ImportError guard degrades telemetry to inert rather than crashing.
+    from opentelemetry._logs import (
+        set_logger_provider as _set_logger_provider,
+    )
     from opentelemetry.metrics import Observation
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -56,8 +69,8 @@ try:
 except ImportError:  # pragma: no cover - exercised only without the extra
     _OTEL_AVAILABLE = False
     logger.info(
-        "OpenTelemetry not installed (telemetry extra); metrics and traces "
-        "are inert."
+        "OpenTelemetry not installed (telemetry extra); metrics, traces "
+        "and logs are inert."
     )
 
 
@@ -74,6 +87,7 @@ _prometheus_enabled: bool = False
 # successful set_*_provider call per process).
 _meter_provider_set: bool = False
 _tracer_provider_set: bool = False
+_logger_provider_set: bool = False
 
 _meter: Any = None
 _tracer: Any = None
@@ -112,13 +126,15 @@ def init_telemetry(
     tracer_provider: Any = None,
 ) -> None:
     """
-    Configure metrics + traces. Idempotent and safe to call repeatedly.
+    Configure metrics, traces, and logs. Idempotent and safe to call repeatedly.
 
     In production (no providers passed) this builds and globally registers a
-    ``MeterProvider`` and ``TracerProvider`` exactly once, driven by *settings*
-    and the standard ``OTEL_*`` env vars. Tests pass ``meter_provider`` /
-    ``tracer_provider`` (e.g. backed by in-memory readers/exporters) to capture
-    output without touching global state.
+    ``MeterProvider``, ``TracerProvider``, and ``LoggerProvider`` exactly once,
+    driven by *settings* and the standard ``OTEL_*`` env vars. The
+    ``LoggerProvider`` also installs a ``LoggingHandler`` on the root logger so
+    all ``logging.getLogger(...)`` calls flow to OTLP alongside traces. Tests
+    pass ``meter_provider`` / ``tracer_provider`` (e.g. backed by in-memory
+    readers/exporters) to capture output without touching global state.
 
     :param settings: Application settings (reads the ``metrics_*`` toggles).
     :param meter_provider: Optional injected meter provider (tests).
@@ -156,7 +172,7 @@ def _ensure_global_providers(settings: Any) -> None:
     Each provider is installed at most once, but a reader-less attempt leaves
     the slot open so a later, exporter-configured init can still install it.
     """
-    global _meter_provider_set, _tracer_provider_set
+    global _meter_provider_set, _tracer_provider_set, _logger_provider_set
     if not _meter_provider_set:
         meter_provider = _build_meter_provider(settings)
         if meter_provider is not None:
@@ -167,6 +183,13 @@ def _ensure_global_providers(settings: Any) -> None:
         if tracer_provider is not None:
             trace.set_tracer_provider(tracer_provider)
             _tracer_provider_set = True
+    if not _logger_provider_set:
+        logger_provider = _build_logger_provider(settings)
+        if logger_provider is not None:
+            _set_logger_provider(logger_provider)
+            handler = LoggingHandler(logger_provider=logger_provider)
+            logging.getLogger().addHandler(handler)
+            _logger_provider_set = True
 
 
 def _build_meter_provider(settings: Any) -> Any:
@@ -223,6 +246,25 @@ def _build_tracer_provider(settings: Any) -> Any:
         return None
 
 
+def _build_logger_provider(settings: Any) -> Any:
+    """Return a ``LoggerProvider`` exporting via OTLP, or ``None``."""
+    if not _otlp_logs_configured():
+        return None
+    try:
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+            OTLPLogExporter,
+        )
+
+        provider = LoggerProvider(resource=_resource())
+        provider.add_log_record_processor(
+            BatchLogRecordProcessor(OTLPLogExporter())
+        )
+        return provider
+    except Exception:  # noqa: BLE001
+        logger.warning("OTLP log exporter setup failed", exc_info=True)
+        return None
+
+
 def _resource() -> Any:
     """Build the OTEL resource (``service.name`` / ``service.version``)."""
     from opentelemetry.sdk.resources import Resource
@@ -254,6 +296,14 @@ def _otlp_traces_configured() -> bool:
     return bool(
         os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
         or os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    )
+
+
+def _otlp_logs_configured() -> bool:
+    """Return whether an OTLP logs endpoint is set in the environment."""
+    return bool(
+        os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        or os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
     )
 
 
