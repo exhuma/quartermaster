@@ -61,6 +61,18 @@ ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 RUN /app/.venv/bin/python -c \
     "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
+# Pre-seed the embedding model (BAAI/bge-small-en-v1.5, ~130 MB ONNX) into a
+# baked cache so the first `resolve_kits` call needs neither network egress nor
+# a writable volume — eliminating the cold-start download that, if interrupted
+# or blocked, silently degrades the resolver to its lexical floor. It is baked
+# under /app and NOT /data on purpose: a runtime bind mount over /data would
+# mask a volume-baked model. fastembed lays the files out under
+# `<cache_dir>/models--…`; the runtime loads from `{QM_EMBEDDINGS_CACHE_DIR}/
+# models`, so this build path and that runtime path must stay in sync.
+RUN /app/.venv/bin/python -c \
+    "from fastembed import TextEmbedding; \
+     TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/app/embeddings/models')"
+
 # Install the project package itself (after deps, to keep the uv sync layer
 # cached). This creates the .dist-info so importlib.metadata.version("quartermaster")
 # resolves correctly at runtime instead of falling back to "0.0.0".
@@ -74,8 +86,12 @@ RUN uv pip install --python /app/.venv/bin/python --no-deps .
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS final
 
-# Run as a non-root user for defence-in-depth.
-RUN useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin appuser
+# Run as a non-root user for defence-in-depth. Give it a real home directory:
+# libraries that cache under $HOME (notably huggingface_hub and its xet
+# downloader, which write chunk caches + logs to ~/.cache/huggingface
+# regardless of any explicit cache_dir) fail with EACCES when /home/appuser
+# does not exist. A writable home keeps those paths from breaking.
+RUN useradd --uid 1001 --create-home --shell /usr/sbin/nologin appuser
 
 # Copy the pre-built virtual environment from the builder stage.
 COPY --from=builder /app/.venv /app/.venv
@@ -84,6 +100,11 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/tiktoken_cache /app/tiktoken_cache
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 
+# Copy the pre-seeded embedding model so trait inference works offline with no
+# cold-start download. Owned by appuser because the trait-embedding JSON caches
+# (keyed by catalog fingerprint) are written into this same dir at runtime.
+COPY --from=builder --chown=appuser:appuser /app/embeddings /app/embeddings
+
 # Copy the application package and the built web UI — no kit content.
 COPY server/app/ /app/server/app/
 COPY --from=frontend /webui/dist /app/server/webui_dist
@@ -91,15 +112,17 @@ COPY --from=frontend /webui/dist /app/server/webui_dist
 # The kit catalog is supplied at runtime via a mounted volume. Create the
 # mount point and make /data writable by the non-root user so the WebDAV
 # authoring endpoint (later phase) and the client registry can write there.
-RUN mkdir -p /data/kits /data/embeddings && chown -R appuser:appuser /data
+RUN mkdir -p /data/kits && chown -R appuser:appuser /data
 ENV QM_KITS_ROOT=/data/kits
 ENV QM_CLIENT_REGISTRY_PATH=/data/client_registry.json
 ENV QM_APP_TOKENS_PATH=/data/app_tokens.json
 ENV QM_WEBUI_DIST=/app/server/webui_dist
-# Keep embedding model files + trait-embedding caches on the writable data
-# volume so they persist across restarts. The model (~130 MB) downloads on
-# the first `resolve_kits` call (one-time cold start), then is reused.
-ENV QM_EMBEDDINGS_CACHE_DIR=/data/embeddings
+# Embedding model + trait-embedding caches live under /app (baked into the
+# image above), NOT on the /data volume — a runtime bind mount over /data would
+# mask the baked model and reintroduce the cold-start download. The model is
+# read-only; the trait-embedding JSON caches are written here at runtime (dir
+# is appuser-owned via the COPY --chown above).
+ENV QM_EMBEDDINGS_CACHE_DIR=/app/embeddings
 
 WORKDIR /app/server
 

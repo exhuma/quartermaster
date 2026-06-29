@@ -555,7 +555,7 @@ to `.env`, but the table below is the authoritative reference.
 | `QM_GITHUB_DEFAULT_ASSIGNEE` | No | Default assignee applied to created kit-gap issues. | unset |
 | `QM_EMBEDDINGS_ENABLED` | No | Use local embeddings for `resolve_kits` trait/section inference. When off (or the dependency is absent) the server degrades to the deterministic lexical floor. | `true` |
 | `QM_EMBEDDINGS_MODEL` | No | Embedding model id loaded by `fastembed`. | `BAAI/bge-small-en-v1.5` |
-| `QM_EMBEDDINGS_CACHE_DIR` | No | Directory for model files + cached trait/section embeddings; put it on a writable volume to persist across restarts. | `/data/embeddings` (Docker image) |
+| `QM_EMBEDDINGS_CACHE_DIR` | No | Directory for model files + cached trait/section embeddings. The Docker image bakes the model in here at build time; keep any override off the `/data` volume (a bind mount there masks the baked model). | `/app/embeddings` (Docker image) |
 | `QM_EMBEDDINGS_MIN_SCORE` | No | Minimum cosine similarity for an embedded trait/section to count. | `0.30` |
 | `QM_EMBEDDINGS_TOP_K_PER_CATEGORY` | No | Max traits the embedding engine emits per category. | `4` |
 | `QM_LLM_PROVIDER` | No | Optional LLM for `resolve_kits` trait inference: `openai` (OpenAI-compatible endpoint) or `anthropic`. Unset disables the LLM layer (embeddings/lexical still work). | unset (feature off) |

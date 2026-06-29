@@ -60,15 +60,13 @@ persist; `/data` itself must be writable by uid 1001.
 | Container path | What it is | Persist? | Default |
 |---|---|---|---|
 | `/data/kits` | **The kit catalog.** Bind-mount your own (possibly private) catalog checkout here. Writes via the `/dav` WebDAV endpoint land here and are visible to the MCP immediately — no restart. | **Required** | `QM_KITS_ROOT=/data/kits` |
-| `/data/embeddings` | Embedding **model files + cached trait/section embeddings**. The model (~130 MB) downloads on the first `resolve_kits` call; persisting this volume avoids re-downloading on every restart. | Strongly recommended | `QM_EMBEDDINGS_CACHE_DIR=/data/embeddings` |
 | `/data/client_registry.json` | Registered non-browser client User-Agents. | Recommended | `QM_CLIENT_REGISTRY_PATH` |
 | `/data/app_tokens.json` | Hashed WebDAV app tokens. | Recommended (if you use `/dav`) | `QM_APP_TOKENS_PATH` |
 | `/data/logging.toml` | Optional `dictConfig` logging file, if you set `QM_LOG_CONFIG`. | Optional | unset |
 
 A simple, durable layout is to mount **one named volume at `/data`** (so the
-catalog, the embedding cache, and the small JSON state files all persist
-together) and, if your catalog lives elsewhere, bind-mount it over
-`/data/kits`:
+catalog and the small JSON state files persist together) and, if your catalog
+lives elsewhere, bind-mount it over `/data/kits`:
 
 ```bash
 docker volume create qm-data
@@ -92,11 +90,13 @@ docker run -d --name quartermaster -p 8000:8000 \
 
 This is the recommended first deployment of the new `resolve_kits` tool: a
 **local embedding model**, no external services, fully self-hosted. It is on
-by default — you just need to give it a persistent cache.
+by default and needs no setup — the model is baked into the image.
 
 > Requires an image built with the `embeddings` extra (this feature version or
-> newer — the stock `server/Dockerfile` includes it). On an image without it,
-> the server silently degrades to the lexical floor; rebuild from this repo
+> newer — the stock `server/Dockerfile` includes it **and bakes the embedding
+> model into the image at build time**, so first use needs no network egress
+> and no writable cache volume). On an image without it, the server silently
+> degrades to the lexical floor; rebuild from this repo
 > (`docker build -f server/Dockerfile . -t quartermaster`) or pull a version
 > that ships it.
 
@@ -106,7 +106,7 @@ by default — you just need to give it a persistent cache.
 |---|---|---|
 | `QM_EMBEDDINGS_ENABLED` | `true` | leave as-is to use embeddings; `false` forces the lexical floor. |
 | `QM_EMBEDDINGS_MODEL` | `BAAI/bge-small-en-v1.5` | you want a different `fastembed`-supported model. |
-| `QM_EMBEDDINGS_CACHE_DIR` | `/data/embeddings` | you mount the cache elsewhere. |
+| `QM_EMBEDDINGS_CACHE_DIR` | `/app/embeddings` | you relocate the baked model / trait-embedding cache. Keep it off the `/data` volume — a bind mount there masks the baked model. |
 | `QM_EMBEDDINGS_MIN_SCORE` | `0.30` | tune recall/precision of inferred traits. |
 | `QM_EMBEDDINGS_TOP_K_PER_CATEGORY` | `4` | cap traits emitted per category. |
 
@@ -122,8 +122,8 @@ docker run -d --name quartermaster -p 8000:8000 \
   -v qm-data:/data \
   -v /srv/kit-catalog:/data/kits \
   ghcr.io/exhuma/quartermaster:stable
-# embeddings are on by default; the model downloads to /data/embeddings on
-# the first resolve_kits call (one-time cold start).
+# embeddings are on by default; the model is baked into the image, so the first
+# resolve_kits call needs no download and no extra mount.
 ```
 
 ### Verify it is using embeddings
@@ -143,16 +143,20 @@ which layer answered.
 
 Operational signals:
 
-- After the first call, model files appear under `/data/embeddings/models/`.
+- The model is baked into the image at `/app/embeddings/models/`; no download
+  happens at runtime, so this works on air-gapped hosts out of the box.
 - `engine: "lexical"` instead of `"embedding"` means embeddings did **not**
-  run. Check the logs for `embeddings unavailable, degrading: …` (missing
-  dependency/model or an unwritable cache dir). The server still works — it
-  has degraded to the deterministic lexical floor — but you are not getting
-  semantic matching.
+  run. Check the logs for `embeddings unavailable, degrading: …` and
+  `trait engine 'embedding' failed: …` (the latter names the underlying
+  exception — e.g. a relocated `QM_EMBEDDINGS_CACHE_DIR` that no longer
+  contains the baked model, or an unwritable cache dir). The server still
+  works — it has degraded to the deterministic lexical floor — but you are not
+  getting semantic matching.
 
-> **Cold start:** the very first `resolve_kits` after a fresh deploy pays the
-> model download + load. Persisting `/data/embeddings` means you pay it once,
-> not on every restart. Air-gapped hosts must pre-seed that directory.
+> **No cold start:** the embedding model ships inside the image, so the first
+> `resolve_kits` after a fresh deploy only pays the in-process model *load*, not
+> a download. Do not point `QM_EMBEDDINGS_CACHE_DIR` at the `/data` volume — a
+> bind mount there masks the baked model and reintroduces a download.
 
 ---
 
@@ -225,8 +229,7 @@ The repo ships [`server/docker-compose.yml`](server/docker-compose.yml) for a
 Traefik v3 front end. To enable the inference stages, add the relevant
 variables to your `.env` (copy from
 [`server/.env.example`](server/.env.example), which has an annotated
-*"server-side inference"* section) and add the embedding cache to the volume
-list:
+*"server-side inference"* section):
 
 ```yaml
 services:
@@ -234,8 +237,8 @@ services:
     # …existing config…
     volumes:
       - /srv/kit-catalog:/data/kits   # your catalog (existing)
-      - qm-data:/data                 # persists /data/embeddings + state
-    # Stage 1 needs nothing extra (embeddings on by default).
+      - qm-data:/data                 # persists the small JSON state files
+    # Stage 1 needs nothing extra (embeddings on by default; model is baked in).
     # Stage 2: set QM_LLM_* in .env to turn on the LLM layer.
 
 volumes:
