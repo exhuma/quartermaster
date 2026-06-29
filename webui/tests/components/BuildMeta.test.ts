@@ -45,8 +45,19 @@ describe('BuildMeta', () => {
     vi.stubEnv('VITE_GITHUB_REPO_URL', '')
     vi.stubEnv('VITE_APP_COMMIT', '')
     vi.stubEnv('VITE_APP_BUILD_TIME', '')
+    vi.stubEnv('VITE_APP_VERSION', '')
     const wrapper = mountBuildMeta()
     expect(wrapper.find('.build-meta').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows the version chip when the version is set', () => {
+    vi.stubEnv('VITE_GITHUB_REPO_URL', '')
+    vi.stubEnv('VITE_APP_COMMIT', '')
+    vi.stubEnv('VITE_APP_VERSION', '2026.6.28-alpha.2')
+    const wrapper = mountBuildMeta()
+    expect(wrapper.find('.build-meta').exists()).toBe(true)
+    expect(wrapper.text()).toContain('2026.6.28-alpha.2')
     wrapper.unmount()
   })
 

@@ -19,6 +19,9 @@ interface ImportMetaEnv {
   readonly VITE_GITHUB_REPO_URL?: string
   readonly VITE_APP_COMMIT?: string
   readonly VITE_APP_BUILD_TIME?: string
+  // Release version, baked from the git tag at image-build time (same value
+  // the backend reports as service.version / X-Quartermaster-Version).
+  readonly VITE_APP_VERSION?: string
 }
 
 interface ImportMeta {

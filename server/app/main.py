@@ -33,8 +33,6 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Awaitable, Callable
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 
 from app.logging_config import configure_logging
 
@@ -89,6 +87,7 @@ from app.routers import app_tokens, clients, integration, kits_admin
 from app.storage.kit_writes import KitPathError
 from app.tokens import count_tokens
 from app.user_agent import UserAgentMiddleware
+from app.version import app_version
 from app.webui import mount_webui
 
 # ---------------------------------------------------------------------------
@@ -871,14 +870,12 @@ def create_app() -> FastAPI:
     #   UserAgent        - rejects unregistered non-browser clients before any
     #                      token work (clear pointer to the registration route).
     #   JWTAuth          - validates the bearer token (innermost).
-    try:
-        app_version = _pkg_version("quartermaster")
-    except PackageNotFoundError:  # pragma: no cover - always installed
-        app_version = "0.0.0"
     application.add_middleware(JWTAuthMiddleware)
     application.add_middleware(UserAgentMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
-    application.add_middleware(VersionHeaderMiddleware, version=app_version)
+    application.add_middleware(
+        VersionHeaderMiddleware, version=app_version()
+    )
     application.add_middleware(RequestLoggingMiddleware)
     return application
 

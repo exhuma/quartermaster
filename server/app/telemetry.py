@@ -37,11 +37,10 @@ import logging
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from typing import Any
 
 from app.tokens import count_tokens, estimate_tokens_from_bytes
+from app.version import app_version
 
 logger = logging.getLogger(__name__)
 
@@ -270,17 +269,11 @@ def _resource() -> Any:
     from opentelemetry.sdk.resources import Resource
 
     # OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES in the env override these.
+    # service.version comes from the shared resolver (env override → package
+    # metadata) so it matches the X-Quartermaster-Version header and the SPA.
     return Resource.create(
-        {"service.name": "quartermaster", "service.version": _version()}
+        {"service.name": "quartermaster", "service.version": app_version()}
     )
-
-
-def _version() -> str:
-    """Return the installed package version, or a placeholder."""
-    try:
-        return _pkg_version("quartermaster")
-    except PackageNotFoundError:  # pragma: no cover - always installed
-        return "0.0.0"
 
 
 def _otlp_metrics_configured() -> bool:

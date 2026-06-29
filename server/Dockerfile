@@ -6,6 +6,18 @@
 # published independently of any private kit content.
 #
 #   docker build -f server/Dockerfile . -t quartermaster
+#
+# Release builds should pass the git tag so the SPA and the API report the
+# same version (frontend VITE_APP_VERSION + backend QM_APP_VERSION, both fed
+# from this one arg):
+#
+#   docker build --build-arg APP_VERSION="$(git describe --tags)" \
+#     -f server/Dockerfile . -t quartermaster
+
+# Single release-version knob, mapped into both stages below. Unset in plain
+# dev builds — the SPA hides the version chip and the API falls back to the
+# installed package metadata.
+ARG APP_VERSION=
 
 # ---------------------------------------------------------------------------
 # Stage 1 — web UI build
@@ -26,6 +38,9 @@ RUN npm ci --no-audit --no-fund
 ARG VITE_GITHUB_REPO_URL
 ARG VITE_APP_COMMIT
 ARG VITE_APP_BUILD_TIME
+# Map the global release knob into the Vite-exposed var so the SPA bakes it in.
+ARG APP_VERSION
+ENV VITE_APP_VERSION=$APP_VERSION
 COPY webui/ ./
 RUN npm run build
 
@@ -127,6 +142,12 @@ ENV QM_EMBEDDINGS_CACHE_DIR=/app/embeddings
 WORKDIR /app/server
 
 USER appuser
+
+# Release version the API reports (service.version + X-Quartermaster-Version),
+# from the same build arg that fed the SPA's VITE_APP_VERSION. Unset → the
+# runtime falls back to the installed package metadata (see app/version.py).
+ARG APP_VERSION
+ENV QM_APP_VERSION=$APP_VERSION
 
 ENV PATH="/app/.venv/bin:$PATH"
 
