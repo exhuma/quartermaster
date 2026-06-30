@@ -28,6 +28,8 @@ from typing import Any
 from app import kits as kits_mod
 from app.kits import (
     KitConflictError,
+    KitLayerNotFoundError,
+    KitLayerReadonlyError,
     KitNotFoundError,
     KitValidationError,
 )
@@ -36,6 +38,7 @@ from app.storage import kit_writes as writes
 __all__ = [
     "SectionInput",
     "list_kits",
+    "list_layers",
     "get_kit_detail",
     "create_kit",
     "delete_kit",
@@ -70,9 +73,51 @@ class SectionInput:
     body: str
 
 
-def _kits_root() -> Path:
-    """Return the configured kits root (honouring test monkeypatching)."""
-    return Path(kits_mod.get_settings().kits_root)
+def _kits_write_root() -> Path:
+    """Return the default writable layer root (last non-readonly layer)."""
+    settings = kits_mod.get_settings()
+    layers = kits_mod._get_effective_layers(settings)
+    for layer in reversed(layers):
+        if not layer.readonly:
+            return layer.path
+    raise RuntimeError(
+        "No writable kit layer configured. "
+        "Set QM_KITS_ROOT or configure at least one non-readonly layer "
+        "in QM_KIT_LAYERS_FILE."
+    )
+
+
+def _layer_path(layer_id: str) -> Path:
+    """
+    Return the path for a named layer (read access, no readonly check).
+
+    :param layer_id: Layer name as configured in QM_KIT_LAYERS_FILE.
+    :raises KitLayerNotFoundError: If no such layer is configured.
+    """
+    settings = kits_mod.get_settings()
+    layers = kits_mod._get_effective_layers(settings)
+    for layer in layers:
+        if layer.name == layer_id:
+            return layer.path
+    raise KitLayerNotFoundError(layer_id)
+
+
+def _layer_write_path(layer_id: str) -> Path:
+    """
+    Return the path for a named layer and enforce it is writable.
+
+    :param layer_id: Layer name as configured in QM_KIT_LAYERS_FILE.
+    :raises KitLayerNotFoundError: If no such layer is configured.
+    :raises KitLayerReadonlyError: If the layer has readonly=true.
+    """
+    settings = kits_mod.get_settings()
+    layers = kits_mod._get_effective_layers(settings)
+    for layer in layers:
+        if layer.name == layer_id:
+            if layer.readonly:
+                raise KitLayerReadonlyError(layer_id)
+            return layer.path
+    raise KitLayerNotFoundError(layer_id)
 
 
 def _toml_basic_string(value: str) -> str:
@@ -183,73 +228,125 @@ def list_kits() -> list[dict[str, Any]]:
     ]
 
 
-def _require_kit(name: str) -> None:
-    """Raise :class:`KitNotFoundError` if *name* is not a known kit."""
-    versions = kits_mod._kit_version_paths(_kits_root())
-    if name not in versions:
-        raise KitNotFoundError(name)
+def _require_kit(name: str, root: Path | None = None) -> None:
+    """
+    Raise :class:`KitNotFoundError` if *name* is not a known kit.
+
+    When *root* is given, checks only that root (used by write ops that
+    target a specific layer). When *root* is ``None``, checks the merged
+    catalog across all configured layers.
+    """
+    if root is not None:
+        if name not in kits_mod._kit_version_paths(root):
+            raise KitNotFoundError(name)
+    else:
+        if not any(k.name == name for k in kits_mod.list_all_kits()):
+            raise KitNotFoundError(name)
 
 
-def get_kit_detail(name: str) -> dict[str, Any]:
+def list_layers() -> list[dict[str, Any]]:
+    """
+    Return metadata for all configured kit layers.
+
+    :returns: List of ``{name, path, readonly}`` dicts, ordered base → overlay.
+    """
+    settings = kits_mod.get_settings()
+    layers = kits_mod._get_effective_layers(settings)
+    return [
+        {
+            "name": layer.name,
+            "path": str(layer.path),
+            "readonly": layer.readonly,
+        }
+        for layer in layers
+    ]
+
+
+def get_kit_detail(name: str, root: Path | None = None) -> dict[str, Any]:
     """
     Return detail for a single kit: versions and applicability summary.
 
     :param name: Kit name.
+    :param root: When given, read from this root only (layer-specific).
     :returns: ``{name, versions, latest_version, applicability}``.
     :raises KitNotFoundError: If the kit does not exist.
     """
-    _require_kit(name)
-    versions = list(kits_mod._kit_version_paths(_kits_root())[name].keys())
+    if root is not None:
+        _require_kit(name, root=root)
+        versions = list(kits_mod._kit_version_paths(root)[name].keys())
+        return {
+            "name": name,
+            "versions": versions,
+            "latest_version": max(versions, key=kits_mod._version_key),
+            "applicability": get_applicability(name, root=root),
+        }
+    # Merged view
+    kit_info = next(
+        (k for k in kits_mod.list_all_kits() if k.name == name), None
+    )
+    if kit_info is None:
+        raise KitNotFoundError(name)
     return {
         "name": name,
-        "versions": versions,
-        "latest_version": max(versions, key=kits_mod._version_key),
+        "versions": kit_info.versions,
+        "latest_version": kit_info.latest_version,
+        "source_layer": kit_info.source_layer,
         "applicability": get_applicability(name),
     }
 
 
-def list_versions(name: str) -> list[str]:
+def list_versions(name: str, root: Path | None = None) -> list[str]:
     """
     List a kit's major versions, oldest first.
 
     :param name: Kit name.
+    :param root: When given, list versions in this root only.
     :returns: Version labels, e.g. ``["v1", "v2"]``.
     :raises KitNotFoundError: If the kit does not exist.
     """
-    _require_kit(name)
-    return list(kits_mod._kit_version_paths(_kits_root())[name].keys())
+    if root is not None:
+        _require_kit(name, root=root)
+        return list(kits_mod._kit_version_paths(root)[name].keys())
+    kit_info = next(
+        (k for k in kits_mod.list_all_kits() if k.name == name), None
+    )
+    if kit_info is None:
+        raise KitNotFoundError(name)
+    return kit_info.versions
 
 
-def get_applicability(name: str) -> dict[str, Any]:
+def get_applicability(name: str, root: Path | None = None) -> dict[str, Any]:
     """
     Return the raw stored ``applicability.json`` for a kit.
 
     :param name: Kit name.
+    :param root: When given, read from this root only.
     :returns: The parsed manifest object as stored on disk.
     :raises KitNotFoundError: If the kit (or its manifest) is missing.
     """
-    _require_kit(name)
-    manifest_file = kits_mod._manifest_path(_kits_root(), name)
+    effective_root = root or kits_mod._resolve_kit_root(name)[0]
+    manifest_file = kits_mod._manifest_path(effective_root, name)
     if not manifest_file.exists():
         raise KitNotFoundError(name)
     return json.loads(manifest_file.read_text(encoding="utf-8"))
 
 
-def get_changelog(name: str) -> str:
+def get_changelog(name: str, root: Path | None = None) -> str:
     """
     Return a kit's raw ``CHANGELOG.md`` text (empty if none on disk).
 
     :param name: Kit name.
+    :param root: When given, read from this root only.
     :returns: Changelog text, or ``""`` if the file is absent.
     :raises KitNotFoundError: If the kit does not exist.
     """
-    _require_kit(name)
-    path = writes.resolve_within(_kits_root(), name, "CHANGELOG.md")
+    effective_root = root or kits_mod._resolve_kit_root(name)[0]
+    path = writes.resolve_within(effective_root, name, "CHANGELOG.md")
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
 def get_section(
-    name: str, version: str, section_id: str
+    name: str, version: str, section_id: str, root: Path | None = None
 ) -> dict[str, Any]:
     """
     Return one section's metadata and body.
@@ -257,20 +354,22 @@ def get_section(
     :param name: Kit name.
     :param version: Version label.
     :param section_id: Section id (the file stem).
-    :returns: ``{id, title, gloss, always_load, body}``.
+    :param root: When given, read from this root only (no merging).
+    :returns: ``{id, title, gloss, always_load, binding, body}``.
     :raises KitNotFoundError / KitVersionNotFoundError: If unresolved.
     :raises KitSectionNotFoundError: If the section id is unknown.
     """
-    outline = kits_mod.read_kit_outline(name, version)
+    outline = kits_mod.read_kit_outline(name, version, root=root)
     meta = next(
         (s for s in outline["sections"] if s["id"] == section_id), None
     )
-    body = kits_mod.read_kit(name, version, sections=[section_id])
+    body = kits_mod.read_kit(name, version, sections=[section_id], root=root)
     return {
         "id": section_id,
         "title": meta["title"] if meta else section_id,
         "gloss": meta["gloss"] if meta else "",
         "always_load": bool(meta["always_load"]) if meta else False,
+        "binding": bool(meta["binding"]) if meta else False,
         "body": body,
     }
 
@@ -287,6 +386,7 @@ def create_kit(
     sections: list[SectionInput],
     changelog: str | None = None,
     version: str = "v1",
+    root: Path | None = None,
 ) -> dict[str, Any]:
     """
     Create a new kit with an initial version.
@@ -301,14 +401,15 @@ def create_kit(
     :param sections: Initial sections (at least one required).
     :param changelog: Optional initial ``CHANGELOG.md`` text.
     :param version: Initial version label (default ``"v1"``).
+    :param root: Target root; defaults to the default writable layer.
     :returns: Kit detail (see :func:`get_kit_detail`).
     :raises KitConflictError: If the kit already exists.
     :raises KitValidationError: If the manifest or index is invalid.
     """
     writes.validate_kit_name(name)
     writes.validate_version(version)
-    root = _kits_root()
-    kit_dir = writes.resolve_within(root, name)
+    effective_root = root or _kits_write_root()
+    kit_dir = writes.resolve_within(effective_root, name)
     if kit_dir.exists():
         raise KitConflictError(f"Kit already exists: {name!r}")
     if not sections:
@@ -320,8 +421,8 @@ def create_kit(
     except ValueError as exc:
         raise KitValidationError(str(exc)) from exc
 
-    root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=root) as tmp:
+    effective_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=effective_root) as tmp:
         staging = Path(tmp) / name
         _populate_instructions(
             staging / version / "instructions", summary, sections
@@ -338,44 +439,48 @@ def create_kit(
         )
         _validate_instructions(staging / version / "instructions", name)
         writes.replace_dir(staging, kit_dir)
-    return get_kit_detail(name)
+    return get_kit_detail(name, root=effective_root)
 
 
-def delete_kit(name: str) -> None:
+def delete_kit(name: str, root: Path | None = None) -> None:
     """
     Delete a kit and all its versions. Idempotent.
 
     :param name: Kit name (no error if it does not exist).
+    :param root: Target root; defaults to the default writable layer.
     """
     writes.validate_kit_name(name)
-    kit_dir = writes.resolve_within(_kits_root(), name)
+    effective_root = root or _kits_write_root()
+    kit_dir = writes.resolve_within(effective_root, name)
     writes.remove_path(kit_dir)
 
 
 def replace_applicability(
-    name: str, applicability: dict[str, Any]
+    name: str, applicability: dict[str, Any], root: Path | None = None
 ) -> dict[str, Any]:
     """
     Replace a kit's ``applicability.json`` (idempotent PUT).
 
-    :param name: Kit name (must already exist).
+    :param name: Kit name (must already exist in the target root).
     :param applicability: New manifest content.
+    :param root: Target root; defaults to the default writable layer.
     :returns: The stored manifest.
-    :raises KitNotFoundError: If the kit does not exist.
+    :raises KitNotFoundError: If the kit does not exist in the target root.
     :raises KitValidationError: If the manifest is invalid.
     """
-    _require_kit(name)
+    effective_root = root or _kits_write_root()
+    _require_kit(name, root=effective_root)
     try:
         kits_mod._validate_manifest(applicability, name)
     except ValueError as exc:
         raise KitValidationError(str(exc)) from exc
     manifest_file = writes.resolve_within(
-        _kits_root(), name, "applicability.json"
+        effective_root, name, "applicability.json"
     )
     writes.atomic_write_text(
         manifest_file, json.dumps(applicability, indent=2) + "\n"
     )
-    return get_applicability(name)
+    return get_applicability(name, root=effective_root)
 
 
 def create_version(
@@ -383,60 +488,67 @@ def create_version(
     version: str,
     summary: str,
     sections: list[SectionInput],
+    root: Path | None = None,
 ) -> list[str]:
     """
     Add a new major version to an existing kit.
 
-    :param name: Kit name (must exist).
+    :param name: Kit name (must exist in the target root).
     :param version: New version label, e.g. ``"v2"``.
     :param summary: Version summary.
     :param sections: Sections for the new version (at least one).
+    :param root: Target root; defaults to the default writable layer.
     :returns: Updated version list.
     :raises KitNotFoundError: If the kit does not exist.
     :raises KitConflictError: If the version already exists.
     :raises KitValidationError: If the proposed index is invalid.
     """
-    _require_kit(name)
+    effective_root = root or _kits_write_root()
+    _require_kit(name, root=effective_root)
     writes.validate_version(version)
     if not sections:
         raise KitValidationError(
             f"Version {version!r} of kit {name!r} must define at least "
             f"one section"
         )
-    root = _kits_root()
-    version_dir = writes.resolve_within(root, name, version)
+    version_dir = writes.resolve_within(effective_root, name, version)
     if version_dir.exists():
         raise KitConflictError(
             f"Version {version!r} already exists for kit {name!r}"
         )
-    kit_dir = writes.resolve_within(root, name)
+    kit_dir = writes.resolve_within(effective_root, name)
     with tempfile.TemporaryDirectory(dir=kit_dir) as tmp:
         staging = Path(tmp) / "instructions"
         _populate_instructions(staging, summary, sections)
         _validate_instructions(staging, name)
         version_dir.mkdir(parents=True, exist_ok=True)
         writes.replace_dir(staging, version_dir / "instructions")
-    return list_versions(name)
+    return list_versions(name, root=effective_root)
 
 
-def delete_version(name: str, version: str) -> list[str]:
+def delete_version(name: str, version: str, root: Path | None = None) -> list[str]:
     """
     Delete one major version of a kit. Idempotent.
 
     :param name: Kit name (must exist).
     :param version: Version label to remove (no error if absent).
+    :param root: Target root; defaults to the default writable layer.
     :returns: Updated version list.
     :raises KitNotFoundError: If the kit does not exist.
     """
-    _require_kit(name)
+    effective_root = root or _kits_write_root()
+    _require_kit(name, root=effective_root)
     writes.validate_version(version)
-    version_dir = writes.resolve_within(_kits_root(), name, version)
+    version_dir = writes.resolve_within(effective_root, name, version)
     writes.remove_path(version_dir)
-    return list_versions(name)
+    return list_versions(name, root=effective_root)
 
 
 def _rewrite_instructions(
-    name: str, version: str, transform: Callable[[Path], None]
+    name: str,
+    version: str,
+    transform: Callable[[Path], None],
+    root: Path | None = None,
 ) -> None:
     """
     Apply *transform* to a staged copy of a version's instructions.
@@ -445,13 +557,32 @@ def _rewrite_instructions(
     lets *transform* mutate it, validates the result, then atomically
     swaps it into place. The live directory is never partially modified.
 
+    When *root* is ``None``, the kit is resolved via the merged catalog
+    view and written to its owning layer (raises
+    :class:`~app.kits.KitLayerReadonlyError` if that layer is readonly).
+    When *root* is given, the kit is resolved and written to that root
+    directly (caller is responsible for readonly enforcement).
+
     :param name: Kit name.
     :param version: Version label.
     :param transform: Callable receiving the staging ``Path`` to mutate.
+    :param root: Target root; ``None`` resolves via merged catalog.
     :raises KitNotFoundError / KitVersionNotFoundError: If unresolved.
+    :raises KitLayerReadonlyError: If the resolved layer is readonly.
     :raises KitValidationError: If the transformed index is invalid.
     """
-    _, index_path = kits_mod._resolve_kit_version(name, version)
+    _, index_path = kits_mod._resolve_kit_version(name, version, root=root)
+    if root is None:
+        settings = kits_mod.get_settings()
+        layers = kits_mod._get_effective_layers(settings)
+        for layer in layers:
+            try:
+                index_path.relative_to(layer.path)
+            except ValueError:
+                continue
+            if layer.readonly:
+                raise KitLayerReadonlyError(layer.name)
+            break
     instr_dir = index_path.parent
     with tempfile.TemporaryDirectory(dir=instr_dir.parent) as tmp:
         staging = Path(tmp) / "instructions"
@@ -477,6 +608,7 @@ def put_section(
     gloss: str,
     always_load: bool,
     body: str,
+    root: Path | None = None,
 ) -> dict[str, Any]:
     """
     Create or replace a section (idempotent PUT).
@@ -492,8 +624,10 @@ def put_section(
     :param gloss: One-line outline summary.
     :param always_load: Always-load flag.
     :param body: Markdown body.
+    :param root: Target root; defaults to the kit's owning layer.
     :returns: The stored section (see :func:`get_section`).
     :raises KitNotFoundError / KitVersionNotFoundError: If unresolved.
+    :raises KitLayerReadonlyError: If the target layer is readonly.
     :raises KitValidationError: If the result is invalid.
     """
     file = f"{section_id}.md"
@@ -521,19 +655,23 @@ def put_section(
             staging / "index.toml", _render_index_toml(summary, sections)
         )
 
-    _rewrite_instructions(name, version, _transform)
-    return get_section(name, version, section_id)
+    _rewrite_instructions(name, version, _transform, root=root)
+    return get_section(name, version, section_id, root=root)
 
 
-def delete_section(name: str, version: str, section_id: str) -> list[str]:
+def delete_section(
+    name: str, version: str, section_id: str, root: Path | None = None
+) -> list[str]:
     """
     Delete a section from a version. Idempotent for an absent section.
 
     :param name: Kit name.
     :param version: Version label.
     :param section_id: Section id to remove.
+    :param root: Target root; defaults to the kit's owning layer.
     :returns: Remaining section ids in document order.
     :raises KitNotFoundError / KitVersionNotFoundError: If unresolved.
+    :raises KitLayerReadonlyError: If the target layer is readonly.
     :raises KitValidationError: If removal would empty the index.
     """
     file = f"{section_id}.md"
@@ -548,6 +686,6 @@ def delete_section(name: str, version: str, section_id: str) -> list[str]:
             staging / "index.toml", _render_index_toml(summary, remaining)
         )
 
-    _rewrite_instructions(name, version, _transform)
-    outline = kits_mod.read_kit_outline(name, version)
+    _rewrite_instructions(name, version, _transform, root=root)
+    outline = kits_mod.read_kit_outline(name, version, root=root)
     return [s["id"] for s in outline["sections"]]

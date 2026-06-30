@@ -4,12 +4,121 @@ Application settings loaded from environment variables via pydantic-settings.
 
 from __future__ import annotations
 
+import tomllib
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import computed_field
+from pydantic import (
+    BaseModel,
+    PrivateAttr,
+    computed_field,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class KitLayerConfig(BaseModel):
+    """
+    Configuration for a single named kit layer.
+
+    Layers are ordered base → overlay (first entry = lowest priority).
+    A kit name present in multiple layers is owned entirely by the
+    highest-priority layer that contains it (kit-level shadowing), except
+    for sections the base layer marks ``binding = true`` — those always
+    appear in the merged kit even when shadowed.
+
+    :param name: URL-safe identifier, e.g. ``"company"`` or ``"team-local"``.
+        Used as the layer path segment in ``/api/kits/layers/{name}`` and
+        ``/dav/{name}/``.
+    :param path: Local filesystem path to the kit catalog root for this layer.
+    :param readonly: When true, REST and WebDAV writes to this layer are
+        rejected with HTTP 403.
+    """
+
+    name: str
+    path: Path
+    readonly: bool = False
+
+
+def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
+    """
+    Parse an ordered list of kit layers from a TOML config file.
+
+    The file lists layers base → overlay as an array of tables::
+
+        # /data/layers.toml
+        [[layer]]
+        name = "company"
+        path = "company-kits"   # relative → resolved against this file's dir
+        readonly = true
+
+        [[layer]]
+        name = "team"
+        path = "/data/team-kits"
+
+    Relative ``path`` values are resolved against the **directory of the
+    TOML file** (not the process CWD), so a self-contained
+    ``layers.toml`` plus sibling catalog directories is portable. Absolute
+    paths are used as-is.
+
+    This is the single shared parser used by both :class:`Settings` and the
+    WebDAV mount, so the file schema lives in exactly one place.
+
+    :param file_path: Path to the layers TOML file.
+    :returns: Ordered, non-empty list of :class:`KitLayerConfig`.
+    :raises FileNotFoundError: If *file_path* does not exist.
+    :raises ValueError: If the document is malformed or defines no layers.
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(
+            f"QM_KIT_LAYERS_FILE points at a missing file: {file_path}"
+        )
+    try:
+        raw = tomllib.loads(file_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(
+            f"Kit layers file {file_path} is not valid TOML: {exc}"
+        ) from exc
+
+    entries = raw.get("layer")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            f"Kit layers file {file_path} must define at least one "
+            f"[[layer]] entry"
+        )
+
+    base_dir = file_path.resolve().parent
+    layers: list[KitLayerConfig] = []
+    seen_names: set[str] = set()
+    for pos, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Kit layers file {file_path}: [[layer]] #{pos} must be "
+                f"a table"
+            )
+        name = str(entry.get("name", "")).strip()
+        path_str = str(entry.get("path", "")).strip()
+        readonly = bool(entry.get("readonly", False))
+        if not name or not path_str:
+            raise ValueError(
+                f"Kit layers file {file_path}: [[layer]] #{pos} must set "
+                f"both 'name' and 'path'"
+            )
+        if name in seen_names:
+            raise ValueError(
+                f"Kit layers file {file_path}: duplicate layer name "
+                f"{name!r}"
+            )
+        seen_names.add(name)
+        layer_path = Path(path_str)
+        if not layer_path.is_absolute():
+            layer_path = (base_dir / layer_path).resolve()
+        layers.append(
+            KitLayerConfig(name=name, path=layer_path, readonly=readonly)
+        )
+    return layers
+
 
 # Server package root (server/), used for dev-only default data paths.
 _SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -46,11 +155,26 @@ class Settings(BaseSettings):
         and hostname verification for outbound Keycloak calls.  **For quick
         POC/testing only — never use in production.**  Takes precedence over
         ``tls_ca_bundle``.
-    :param kits_root: Path to the ``kits/`` directory where kit
-        subdirectories live.  Required — the catalog is decoupled from
-        this server and is never bundled with it. Point ``KITS_ROOT`` at
-        your kit catalog: a local checkout in dev, or the mounted volume
-        in production (e.g. ``/data/kits``).
+    :param kits_root: Path to a single-root kit catalog directory.
+        Single-root option; set ``QM_KITS_ROOT`` when you have one catalog.
+        Superseded by ``kit_layers_file`` / ``QM_KIT_LAYERS_FILE`` for
+        multi-root layered setups — if both are set, ``kit_layers_file`` wins.
+        At least one of ``kits_root`` or ``kit_layers_file`` is required.
+    :param kit_layers_file: Path to a TOML file listing named kit layers
+        (``QM_KIT_LAYERS_FILE``), ordered base → overlay::
+
+            [[layer]]
+            name = "company"
+            path = "company-kits"   # relative → resolved against this file
+            readonly = true
+
+            [[layer]]
+            name = "team"
+            path = "team-kits"
+
+        Relative layer ``path`` values are resolved against the file's own
+        directory.  If set, ``kits_root`` is ignored.  At least one layer
+        must be writable (``readonly`` omitted or ``false``).
     :param webui_keycloak_client_id: Keycloak public client id used by
         the browser web UI for the OIDC authorization-code + PKCE flow.
         Advertised to the SPA via runtime config.
@@ -156,7 +280,8 @@ class Settings(BaseSettings):
     keycloak_audience: str | None = None
     tls_ca_bundle: Path | None = None
     tls_insecure_skip_verify: bool = False
-    kits_root: Path
+    kits_root: Path | None = None
+    kit_layers_file: Path | None = None
     resource_base_url: str
     webui_keycloak_client_id: str = "quartermaster-webui"
     client_registry_path: Path = _CLIENT_REGISTRY_DEFAULT
@@ -196,6 +321,51 @@ class Settings(BaseSettings):
     metrics_prometheus_enabled: bool = False
     metrics_allow_anonymous: bool = False
     metrics_section_level: bool = False
+
+    # Layers parsed from ``kit_layers_file`` once, at validation time, so the
+    # file is read a single time and ``effective_layers`` stays cheap.
+    _file_layers: list[KitLayerConfig] | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _validate_kit_config(self) -> "Settings":
+        """Ensure at least one kit root is configured with at least one writable layer."""
+        if self.kit_layers_file is not None:
+            self._file_layers = load_layers_from_toml(self.kit_layers_file)
+
+        if self.kits_root is None and self._file_layers is None:
+            raise ValueError(
+                "No kit catalog configured. Set either QM_KIT_LAYERS_FILE "
+                "(a TOML layers file) or QM_KITS_ROOT (a single catalog "
+                "directory — a local checkout in dev, /data/kits in "
+                "production)."
+            )
+
+        # kits_root maps to one always-writable default layer, so the writable
+        # check only applies to a configured layers file.
+        if self._file_layers is not None and all(
+            layer.readonly for layer in self._file_layers
+        ):
+            raise ValueError(
+                "At least one kit layer must be writable "
+                "(not all layers can have readonly=true)."
+            )
+        return self
+
+    @property
+    def effective_layers(self) -> list[KitLayerConfig]:
+        """
+        Return the ordered list of kit layers (base → overlay, last = highest priority).
+
+        Precedence: layers from ``kit_layers_file`` (TOML) win; failing that,
+        ``kits_root`` is wrapped in a single ``"default"`` layer for
+        single-root deployments.
+
+        :returns: Non-empty list of :class:`KitLayerConfig`, lowest priority first.
+        """
+        if self._file_layers is not None:
+            return self._file_layers
+        # kits_root is guaranteed non-None here by the model validator
+        return [KitLayerConfig(name="default", path=self.kits_root)]  # type: ignore[arg-type]
 
     @computed_field  # type: ignore[prop-decorator]
     @property

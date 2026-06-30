@@ -59,10 +59,10 @@ def _now() -> str:
 
 
 def _check_kits_root(settings: Settings) -> ComponentHealth:
-    """Check the kit catalog directory is present and readable."""
+    """Check all configured kit catalog layers are present and readable."""
     start = time.monotonic()
-    root = settings.kits_root
-    ok = root.is_dir()
+    layers = settings.effective_layers
+    ok = all(layer.path.is_dir() for layer in layers)
     latency = round((time.monotonic() - start) * 1000)
     return ComponentHealth(
         name="kit-catalog",

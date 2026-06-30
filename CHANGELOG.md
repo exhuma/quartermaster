@@ -8,6 +8,15 @@ project aims to follow semantic versioning.
 
 ### Added
 
+- Multi-root kit catalogs ("layers"): compose several catalogs as an ordered
+  base → overlay stack via `QM_KIT_LAYERS_FILE` (a TOML layers file; relative
+  paths resolve against the file's directory). Kit-level shadowing (the
+  highest-priority layer owns a kit entirely), with base-layer sections marked
+  `binding = true` surviving shadowing. Each layer is addressable at
+  `/api/kits/layers/<name>/...` and `/dav/<name>/`, and can be marked
+  `readonly = true` (writes → HTTP 403). A single `QM_KITS_ROOT` is fully
+  backward compatible (treated as one `default` layer; `/dav/` and `/api/kits`
+  URLs unchanged). See `MIGRATING-KIT-LAYERS.md`.
 - Hardening HTTP middleware (module-http-middleware-hardening): a per-request
   correlation ID (`X-Correlation-ID`, honoured inbound, echoed back, shared by
   every log line via a contextvar), the three standard security headers, an

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.config import get_settings
+from app.config import KitLayerConfig, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,30 @@ class KitValidationError(Exception):
         super().__init__(message)
 
 
+class KitLayerNotFoundError(Exception):
+    """
+    Raised when a requested layer identifier is not configured.
+
+    :param layer_name: The layer name that was requested.
+    """
+
+    def __init__(self, layer_name: str) -> None:
+        super().__init__(f"Kit layer not found: {layer_name!r}")
+        self.layer_name = layer_name
+
+
+class KitLayerReadonlyError(Exception):
+    """
+    Raised when a write is attempted on a read-only layer.
+
+    :param layer_name: The layer name that is read-only.
+    """
+
+    def __init__(self, layer_name: str) -> None:
+        super().__init__(f"Kit layer {layer_name!r} is read-only")
+        self.layer_name = layer_name
+
+
 @dataclass(frozen=True)
 class KitInfo:
     """
@@ -140,12 +164,16 @@ class KitInfo:
     :param versions: Sorted list of available major version strings,
         e.g. ``["v1", "v2"]``, from oldest to newest.
     :param latest_version: The highest available major version string.
+    :param source_layer: Name of the layer that owns this kit (the
+        highest-priority layer containing it). ``None`` in legacy
+        single-root usage.
     """
 
     name: str
     description: str
     versions: list[str]
     latest_version: str
+    source_layer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +189,12 @@ class KitSection:
     :param gloss: One-line summary shown in the outline.
     :param always_load: Whether this section holds core invariants that
         an agent should always pull into context.
+    :param binding: When ``true``, this section cannot be overridden by
+        a higher-priority overlay layer.  A binding section in a
+        lower-priority (base) layer is always contributed to the merged
+        kit, even when an overlay kit shadows the same kit name.
+        Relevant only in multi-root layered setups; has no effect in
+        single-root deployments.
     """
 
     id: str
@@ -168,6 +202,7 @@ class KitSection:
     title: str
     gloss: str
     always_load: bool
+    binding: bool = False
 
 
 @dataclass(frozen=True)
@@ -496,6 +531,12 @@ def _load_kit_index(index_path: Path, kit_name: str) -> KitIndex:
                 f"Index for kit {kit_name!r}: section {file!r} field "
                 f"'always_load' must be a boolean"
             )
+        binding = entry.get("binding", False)
+        if not isinstance(binding, bool):
+            raise ValueError(
+                f"Index for kit {kit_name!r}: section {file!r} field "
+                f"'binding' must be a boolean"
+            )
         section_id = Path(file).stem
         if section_id in seen_ids:
             raise ValueError(
@@ -510,6 +551,7 @@ def _load_kit_index(index_path: Path, kit_name: str) -> KitIndex:
                 title=title,
                 gloss=str(entry.get("gloss", "")).strip(),
                 always_load=always_load,
+                binding=binding,
             )
         )
 
@@ -545,6 +587,126 @@ def _kit_version_paths(root: Path) -> dict[str, dict[str, Path]]:
         )
         for name, versions in sorted(result.items())
     }
+
+
+def _get_effective_layers(settings: Any) -> list[KitLayerConfig]:
+    """
+    Return effective layers from a Settings-like object.
+
+    Handles both the real :class:`~app.config.Settings` (which has
+    ``effective_layers``) and the minimal mocks used in tests (which
+    only have ``kits_root``).
+
+    :param settings: Any object that has ``effective_layers`` or
+        ``kits_root``.
+    :returns: Non-empty list of :class:`KitLayerConfig`.
+    """
+    if hasattr(settings, "effective_layers"):
+        return settings.effective_layers
+    root = getattr(settings, "kits_root", None)
+    if root is not None:
+        return [KitLayerConfig(name="default", path=Path(root), readonly=False)]
+    raise ValueError("Settings object has no kit root configured")
+
+
+def _kit_version_paths_layered(
+    layers: list[KitLayerConfig],
+) -> dict[str, dict[str, tuple[Path, Path, str]]]:
+    """
+    Scan multiple kit layers and merge with kit-level shadowing.
+
+    Iterates *layers* from lowest to highest priority.  When the same
+    kit name appears in multiple layers, the highest-priority layer that
+    contains it owns **all** its versions (kit-level shadowing).
+
+    :param layers: Ordered list of layers, base (index 0) → overlay
+        (last).
+    :returns: Mapping of kit name → ``{version: (index_path,
+        layer_root, layer_name)}``, versions sorted oldest → newest.
+    """
+    merged: dict[str, tuple[dict[str, Path], Path, str]] = {}
+    for layer in layers:
+        layer_paths = _kit_version_paths(layer.path)
+        for kit_name, versions in layer_paths.items():
+            merged[kit_name] = (versions, layer.path, layer.name)
+
+    result: dict[str, dict[str, tuple[Path, Path, str]]] = {}
+    for kit_name in sorted(merged.keys()):
+        versions, layer_root, layer_name = merged[kit_name]
+        result[kit_name] = {
+            version: (index_path, layer_root, layer_name)
+            for version, index_path in sorted(
+                versions.items(), key=lambda kv: _version_key(kv[0])
+            )
+        }
+    return result
+
+
+def _resolve_kit_root(name: str) -> tuple[Path, str]:
+    """
+    Return the root and layer name for the highest-priority layer
+    containing *name*.
+
+    :param name: Kit name.
+    :returns: Tuple of ``(root_path, layer_name)``.
+    :raises KitNotFoundError: If no configured layer contains *name*.
+    """
+    settings = get_settings()
+    layers = _get_effective_layers(settings)
+    for layer in reversed(layers):
+        if name in _kit_version_paths(layer.path):
+            return layer.path, layer.name
+    raise KitNotFoundError(name)
+
+
+def _resolve_merged_kit(
+    name: str, version: str | None = None
+) -> tuple[str, Path, list[tuple["KitSection", Path]]]:
+    """
+    Resolve a kit for a merged read, collecting binding section contributions.
+
+    Finds the primary (overlay) layer for *name* and then walks
+    lower-priority layers to collect sections whose ``binding=true``
+    attribute means they survive shadowing.
+
+    :param name: Kit name.
+    :param version: Major version string; defaults to latest.
+    :returns: Tuple of ``(resolved_version, primary_index_path,
+        binding_contributions)`` where *binding_contributions* is a list
+        of ``(KitSection, instr_dir)`` pairs from lower-priority layers.
+    :raises KitNotFoundError: If no layer has the kit.
+    :raises KitVersionNotFoundError: If the version does not exist in
+        the primary layer.
+    """
+    settings = get_settings()
+    layers = _get_effective_layers(settings)
+    layered = _kit_version_paths_layered(layers)
+
+    if name not in layered:
+        raise KitNotFoundError(name)
+
+    kit_versions = layered[name]
+    resolved = version or max(kit_versions, key=_version_key)
+    if resolved not in kit_versions:
+        raise KitVersionNotFoundError(name, resolved)
+
+    primary_index_path, _primary_root, primary_layer_name = kit_versions[resolved]
+
+    # Collect binding sections from lower-priority layers
+    binding_contributions: list[tuple[KitSection, Path]] = []
+    for layer in layers:
+        if layer.name == primary_layer_name:
+            break
+        lower_versions = _kit_version_paths(layer.path)
+        if name in lower_versions and resolved in lower_versions[name]:
+            lower_index_path = lower_versions[name][resolved]
+            lower_index = _load_kit_index(lower_index_path, name)
+            lower_instr_dir = lower_index_path.parent
+            for section in lower_index.sections:
+                if section.binding:
+                    binding_contributions.append((section, lower_instr_dir))
+
+    return resolved, primary_index_path, binding_contributions
 
 
 def _parse_version_tuple(v: str) -> tuple[int, ...]:
@@ -643,6 +805,8 @@ def _catalog_entries(
     A kit whose ``applicability.json`` is missing or malformed is skipped
     and recorded as a warning rather than aborting the whole catalog, so a
     single bad manifest does not take down discovery for every other kit.
+    In multi-root setups, the kit is loaded from its owning (highest-
+    priority) layer.
 
     :param strict: When true, re-raise the first manifest error instead of
         skipping it. Useful for CI/tests that want fail-fast validation.
@@ -651,12 +815,28 @@ def _catalog_entries(
         ``warnings`` is a list of ``{"kit": name, "error": message}`` dicts
         for every kit whose manifest could not be loaded.
     """
-    settings = get_settings()
     entries: list[tuple[KitInfo, KitApplicability]] = []
     warnings: list[dict[str, str]] = []
+    settings = get_settings()
+    layers = _get_effective_layers(settings)
+    layer_by_name = {layer.name: layer for layer in layers}
     for info in list_all_kits():
+        # Resolve the kit's owning layer root from the source_layer tag
+        layer = layer_by_name.get(info.source_layer or "")
+        if layer is None:
+            # Fallback for legacy single-root mocks without source_layer
+            try:
+                root, _ = _resolve_kit_root(info.name)
+            except KitNotFoundError:
+                warnings.append({
+                    "kit": info.name,
+                    "error": "could not resolve kit layer",
+                })
+                continue
+        else:
+            root = layer.path
         try:
-            applicability = _load_manifest(settings.kits_root, info.name)
+            applicability = _load_manifest(root, info.name)
         except (ValueError, FileNotFoundError, OSError) as exc:
             if strict:
                 raise
@@ -781,23 +961,33 @@ def iter_catalog() -> list[tuple[KitInfo, KitApplicability]]:
 
 def list_all_kits() -> list[KitInfo]:
     """
-    Return metadata for all available instruction kits.
+    Return metadata for all available instruction kits (merged view).
+
+    In a multi-root setup, kit names present in multiple layers are
+    represented once, from the highest-priority (overlay) layer.
 
     :returns: List of :class:`KitInfo` instances sorted alphabetically
         by kit name, each including available versions and the latest.
     """
     settings = get_settings()
-    logger.debug("list_all_kits: scanning %s", settings.kits_root)
+    layers = _get_effective_layers(settings)
+    logger.debug(
+        "list_all_kits: scanning %d layer(s): %s",
+        len(layers),
+        [layer.name for layer in layers],
+    )
     kits: list[KitInfo] = []
-    for name, versions in _kit_version_paths(settings.kits_root).items():
-        latest = max(versions, key=_version_key)
-        index = _load_kit_index(versions[latest], name)
+    for name, versions_with_src in _kit_version_paths_layered(layers).items():
+        latest = max(versions_with_src, key=_version_key)
+        index_path, _layer_root, layer_name = versions_with_src[latest]
+        index = _load_kit_index(index_path, name)
         kits.append(
             KitInfo(
                 name=name,
                 description=index.summary,
-                versions=list(versions.keys()),
+                versions=list(versions_with_src.keys()),
                 latest_version=latest,
+                source_layer=layer_name,
             )
         )
     return kits
@@ -1047,7 +1237,7 @@ def explain_kit_v2(
 
 
 def _resolve_kit_version(
-    name: str, version: str | None = None
+    name: str, version: str | None = None, root: Path | None = None
 ) -> tuple[str, Path]:
     """
     Resolve a kit name and optional version to its index path.
@@ -1055,17 +1245,29 @@ def _resolve_kit_version(
     :param name: Kit name as returned by :func:`list_all_kits`.
     :param version: Major version string, e.g. ``"v1"``.  Defaults to
         the latest available version when omitted.
+    :param root: When given, resolve within this specific root only
+        (used by layer-specific read/write operations).  When ``None``,
+        use the merged catalog across all configured layers.
     :returns: Tuple of ``(resolved_version, index_toml_path)``.
     :raises KitNotFoundError: If no kit with *name* exists.
     :raises KitVersionNotFoundError: If *version* does not exist for
         the kit.
     """
-    settings = get_settings()
-    all_versions = _kit_version_paths(settings.kits_root)
-    if name not in all_versions:
-        logger.debug("resolve: kit %r not found", name)
-        raise KitNotFoundError(name)
-    versions = all_versions[name]
+    if root is not None:
+        all_versions = _kit_version_paths(root)
+        if name not in all_versions:
+            logger.debug("resolve(root=%s): kit %r not found", root, name)
+            raise KitNotFoundError(name)
+        versions = all_versions[name]
+    else:
+        settings = get_settings()
+        layers = _get_effective_layers(settings)
+        layered = _kit_version_paths_layered(layers)
+        if name not in layered:
+            logger.debug("resolve: kit %r not found", name)
+            raise KitNotFoundError(name)
+        # Extract simple {version: index_path} for the kit
+        versions = {v: data[0] for v, data in layered[name].items()}
     resolved = version or max(versions, key=_version_key)
     if resolved not in versions:
         logger.debug("resolve: version %r not found for kit %r", resolved, name)
@@ -1073,37 +1275,76 @@ def _resolve_kit_version(
     return resolved, versions[resolved]
 
 
-def read_kit_outline(name: str, version: str | None = None) -> dict[str, Any]:
+def read_kit_outline(
+    name: str, version: str | None = None, root: Path | None = None
+) -> dict[str, Any]:
     """
     Return a cheap section map for a kit without loading section bodies.
 
     Read this before :func:`read_kit` to decide which sections the
     current task needs, then pull only those.
 
+    In the default merged mode (``root=None``), binding sections from
+    lower-priority base layers are included even when the kit is
+    shadowed by a higher-priority overlay layer.
+
     :param name: Kit name as returned by :func:`list_all_kits`.
     :param version: Major version string; defaults to the latest.
+    :param root: When given, return the outline for exactly this root
+        (no binding-section merging). Used by layer-specific reads.
     :returns: ``{name, version, summary, sections}`` where each section
-        is ``{id, title, gloss, always_load, bytes}``.
+        is ``{id, title, gloss, always_load, binding, bytes}``.
     :raises KitNotFoundError: If no kit with *name* exists.
     :raises KitVersionNotFoundError: If *version* does not exist.
     """
-    resolved, index_path = _resolve_kit_version(name, version)
-    index = _load_kit_index(index_path, name)
-    instr_dir = index_path.parent
+    if root is not None:
+        resolved, index_path = _resolve_kit_version(name, version, root=root)
+        index = _load_kit_index(index_path, name)
+        instr_dir = index_path.parent
+        sections = [
+            {
+                "id": s.id,
+                "title": s.title,
+                "gloss": s.gloss,
+                "always_load": s.always_load,
+                "binding": s.binding,
+                "bytes": (instr_dir / s.file).stat().st_size,
+            }
+            for s in index.sections
+        ]
+        return {
+            "name": name,
+            "version": resolved,
+            "summary": index.summary,
+            "sections": sections,
+        }
+
+    # Merged mode: include binding contributions from lower-priority layers
+    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(name, version)
+    primary_index = _load_kit_index(primary_index_path, name)
+    primary_instr_dir = primary_index_path.parent
+
+    binding_ids = {s.id for s, _ in binding_contribs}
+    merged: list[tuple[KitSection, Path]] = list(binding_contribs)
+    for s in primary_index.sections:
+        if s.id not in binding_ids:
+            merged.append((s, primary_instr_dir))
+
     sections = [
         {
             "id": s.id,
             "title": s.title,
             "gloss": s.gloss,
             "always_load": s.always_load,
-            "bytes": (instr_dir / s.file).stat().st_size,
+            "binding": s.binding,
+            "bytes": (d / s.file).stat().st_size,
         }
-        for s in index.sections
+        for s, d in merged
     ]
     return {
         "name": name,
         "version": resolved,
-        "summary": index.summary,
+        "summary": primary_index.summary,
         "sections": sections,
     }
 
@@ -1112,9 +1353,14 @@ def read_kit(
     name: str,
     version: str | None = None,
     sections: list[str] | None = None,
+    root: Path | None = None,
 ) -> str:
     """
     Return the content of a named instruction kit.
+
+    In the default merged mode (``root=None``), binding sections from
+    lower-priority base layers are included even when the kit is
+    shadowed by a higher-priority overlay layer.
 
     :param name: Kit name as returned by :func:`list_all_kits`.
     :param version: Major version string, e.g. ``"v1"``.  Defaults to
@@ -1123,6 +1369,8 @@ def read_kit(
         :func:`read_kit_outline`).  When omitted, all sections are
         concatenated in document order — the complete instructions.
         When given, only those sections are returned, in document order.
+    :param root: When given, read from exactly this root (no binding-
+        section merging). Used by layer-specific reads.
     :returns: UTF-8 Markdown for the requested sections.
     :raises KitNotFoundError: If no kit with *name* exists.
     :raises KitVersionNotFoundError: If *version* does not exist.
@@ -1130,26 +1378,55 @@ def read_kit(
         unknown for the kit.
     """
     logger.debug(
-        "read_kit: name=%r version=%r sections=%r", name, version, sections
+        "read_kit: name=%r version=%r sections=%r root=%r",
+        name, version, sections, root,
     )
-    resolved, index_path = _resolve_kit_version(name, version)
-    index = _load_kit_index(index_path, name)
-    instr_dir = index_path.parent
 
-    selected = index.sections
+    if root is not None:
+        # Layer-specific read: no binding-section merging
+        resolved, index_path = _resolve_kit_version(name, version, root=root)
+        index = _load_kit_index(index_path, name)
+        instr_dir = index_path.parent
+        selected_sections = index.sections
+        if sections is not None:
+            by_id = {s.id: s for s in index.sections}
+            unknown = [s for s in sections if s not in by_id]
+            if unknown:
+                raise KitSectionNotFoundError(
+                    name, unknown, [s.id for s in index.sections]
+                )
+            wanted = set(sections)
+            selected_sections = [s for s in index.sections if s.id in wanted]
+        bodies = [
+            (instr_dir / s.file).read_text(encoding="utf-8").strip("\n")
+            for s in selected_sections
+        ]
+        return "\n\n".join(bodies) + "\n"
+
+    # Merged read: include binding contributions from lower-priority layers
+    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(name, version)
+    primary_index = _load_kit_index(primary_index_path, name)
+    primary_instr_dir = primary_index_path.parent
+
+    binding_ids = {s.id for s, _ in binding_contribs}
+    merged: list[tuple[KitSection, Path]] = list(binding_contribs)
+    for s in primary_index.sections:
+        if s.id not in binding_ids:
+            merged.append((s, primary_instr_dir))
+
     if sections is not None:
-        by_id = {s.id: s for s in index.sections}
-        unknown = [s for s in sections if s not in by_id]
+        all_ids = {s.id for s, _ in merged}
+        unknown = [s for s in sections if s not in all_ids]
         if unknown:
             raise KitSectionNotFoundError(
-                name, unknown, [s.id for s in index.sections]
+                name, unknown, [s.id for s, _ in merged]
             )
         wanted = set(sections)
-        selected = [s for s in index.sections if s.id in wanted]
+        merged = [(s, d) for s, d in merged if s.id in wanted]
 
     bodies = [
-        (instr_dir / s.file).read_text(encoding="utf-8").strip("\n")
-        for s in selected
+        (d / s.file).read_text(encoding="utf-8").strip("\n")
+        for s, d in merged
     ]
     return "\n\n".join(bodies) + "\n"
 
@@ -1191,12 +1468,18 @@ def compare_kit_versions(
     :raises KitNotFoundError: If no kit with *name* exists.
     :raises FileNotFoundError: If the kit has no ``CHANGELOG.md``.
     """
-    settings = get_settings()
     logger.debug(
         "compare_kit_versions: name=%r %r..%r", name, from_version, to_version
     )
-    kit_dir = settings.kits_root / name
-    if not kit_dir.is_dir():
+    settings = get_settings()
+    layers = _get_effective_layers(settings)
+    kit_dir: Path | None = None
+    for layer in reversed(layers):
+        candidate = layer.path / name
+        if candidate.is_dir():
+            kit_dir = candidate
+            break
+    if kit_dir is None:
         raise KitNotFoundError(name)
     changelog_path = kit_dir / "CHANGELOG.md"
     if not changelog_path.exists():

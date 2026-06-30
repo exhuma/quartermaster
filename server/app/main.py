@@ -55,6 +55,8 @@ from app.config import get_settings
 from app.dav.webdav_app import mount_dav
 from app.kits import (
     KitConflictError,
+    KitLayerNotFoundError,
+    KitLayerReadonlyError,
     KitNotFoundError,
     KitSectionNotFoundError,
     KitValidationError,
@@ -83,7 +85,7 @@ from app.requests import (
 )
 from app.requests import request_kit_extension as _request_kit_extension
 from app.resolver import resolve_kits as _resolve_kits
-from app.routers import app_tokens, clients, integration, kits_admin
+from app.routers import app_tokens, clients, integration, kits_admin, kits_layers
 from app.storage.kit_writes import KitPathError
 from app.tokens import count_tokens
 from app.user_agent import UserAgentMiddleware
@@ -724,9 +726,11 @@ _EXCEPTION_STATUS: dict[type[Exception], int] = {
     KitNotFoundError: 404,
     KitVersionNotFoundError: 404,
     KitSectionNotFoundError: 404,
+    KitLayerNotFoundError: 404,
     KitConflictError: 409,
     KitValidationError: 422,
     KitPathError: 400,
+    KitLayerReadonlyError: 403,
 }
 
 
@@ -814,6 +818,9 @@ def create_app() -> FastAPI:
 
     # /api admin + integration + client-registration routers (protected
     # by the JWT + User-Agent middleware).
+    # kits_layers must be registered before kits_admin so that the more-specific
+    # /api/kits/layers/* paths are matched before /api/kits/{name}.
+    application.include_router(kits_layers.router)
     application.include_router(kits_admin.router)
     application.include_router(integration.router)
     application.include_router(clients.router)

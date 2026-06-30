@@ -55,6 +55,14 @@ Rules:
 - Front-load invariants and prohibited patterns into `always_load = true`
   sections; isolate heavy code templates into their own (skippable) sections.
 
+Optional per-section field:
+- `binding` (boolean, default `false`) — only meaningful when this catalog is
+  used as a **base layer** under overlays. A `binding = true` section carries
+  down the layer stack: an overlay that shadows the kit still inherits it and
+  cannot drop or replace it. Inert in single-root deployments. Reserve it for
+  genuinely non-negotiable sections (security policy, compliance rules). See
+  `MIGRATING-KIT-LAYERS.md` → "Binding sections" for the full semantics.
+
 ## `applicability.json` — the selector metadata
 
 Drives trait-based ranking (`select_kits`/`explain_kit_candidate`). **All**
