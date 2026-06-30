@@ -11,6 +11,8 @@ def test_list_canned_prompts_has_expected_entries() -> None:
     prompts = list_canned_prompts()
     names = {prompt["name"] for prompt in prompts}
     assert names == {
+        "greet",
+        "integrate_project",
         "trait_selection_bootstrap",
         "legacy_assessment",
         "bootstrap_sequence",

@@ -19,12 +19,24 @@ _EXPECTED = {
     "bootstrap_sequence",
     "capability_extension",
     "tech_debt_modernization",
+    "greet",
+    "integrate_project",
 }
 
 
 def _prompt_names() -> set[str]:
     prompts = asyncio.run(mcp.list_prompts())
     return {p.name for p in prompts}
+
+
+def _render_prompt(name: str) -> str:
+    prompt = asyncio.run(mcp.get_prompt(name))
+    rendered = asyncio.run(prompt.render({}))
+    return "".join(
+        msg.content.text
+        for msg in rendered.messages
+        if hasattr(msg.content, "text")
+    )
 
 
 def test_all_canned_prompts_registered_as_native_prompts() -> None:
@@ -54,6 +66,23 @@ def test_native_prompt_renders_template_text() -> None:
     # The rendered prompt is the canned template verbatim.
     assert "resolve_kits" in text
     assert "select_kits" in text
+
+
+def test_greet_prompt_orients_a_new_agent() -> None:
+    text = _render_prompt("greet")
+    # Purpose, the one-shot fast path, prompt discovery, and the
+    # integration hand-off all belong in the greeting.
+    assert "resolve_kits" in text
+    assert "list_prompts" in text
+    assert "integrate_project" in text
+
+
+def test_integrate_project_prompt_targets_instruction_files() -> None:
+    text = _render_prompt("integrate_project")
+    # The agent must know which files to look for and what to write.
+    assert "CLAUDE.md" in text
+    assert "AGENTS.md" in text
+    assert "trait vocabulary" in text
 
 
 def test_prompt_tools_still_registered() -> None:

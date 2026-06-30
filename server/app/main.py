@@ -543,12 +543,66 @@ def _is_low_confidence(result: dict, settings: Any) -> bool:
     )
 
 
+_REPORT_INSTRUCTION = (
+    "Quartermaster diagnostics are active. After completing this task, "
+    "present the user with a **Quartermaster Insights report** containing "
+    "the following sections:\n"
+    "1. Traits inferred — list the languages, frameworks, capabilities, and "
+    "contexts that were detected from the task description, and note which "
+    "inference engine (sampling / LLM / embedding / lexical) identified them. "
+    "Mention if you were asked to clarify the task before kits could be "
+    "matched.\n"
+    "2. Kits selected — for each kit loaded, name it and summarise the key "
+    "guidance it provided (invariants, required patterns, prohibited "
+    "approaches).\n"
+    "3. Impact on this task — for each significant implementation decision, "
+    "state whether and how a kit's guidance shaped it. Be explicit (e.g. "
+    "\"Used PKCE flow because module-auth-oidc requires it\"). If a decision "
+    "was not influenced by any kit, say so — gaps in coverage are useful data "
+    "for evaluating Quartermaster.\n"
+    "Keep the report concise but honest. Its purpose is to let the user "
+    "assess whether Quartermaster's guidance improved the outcome."
+)
+
+
+def _build_diagnostics(result: dict, *, clarification_used: bool) -> dict:
+    """
+    Assemble the ``_diagnostics`` metadata block from a resolve *result*.
+
+    All values are already present in the resolver's return dict; this only
+    reshapes them for human evaluation and appends the report directive.
+
+    :param result: The finalised resolve result (post-elicitation).
+    :param clarification_used: Whether an elicitation round refined the task.
+    :returns: The diagnostics block to attach under ``result["_diagnostics"]``.
+    """
+    traits = result.get("inferred_traits", {})
+    return {
+        "engine": result.get("engine"),
+        "clarification_used": clarification_used,
+        "trait_provenance": traits.get("provenance", []),
+        "kit_scores": [
+            {
+                "name": kit["name"],
+                "score": kit["score"],
+                "confidence": kit["confidence"],
+                "reasons": kit["reasons"],
+            }
+            for kit in result.get("kits", [])
+        ],
+        "coverage": result.get("coverage"),
+        "selection_confidence": result.get("confidence"),
+        "report_instruction": _REPORT_INSTRUCTION,
+    }
+
+
 @mcp.tool
 async def resolve_kits(
     task: str,
     broaden: bool = False,
     limit: int = 8,
     max_sections_per_kit: int = 8,
+    include_diagnostics: bool = False,
     ctx: Context | None = None,
 ) -> dict:
     """
@@ -574,9 +628,14 @@ async def resolve_kits(
     :param limit: Maximum number of candidate kits to return.
     :param max_sections_per_kit: Cap on non-``always_load`` sections offered
         per kit for on-demand fetching.
+    :param include_diagnostics: When true, attach a ``_diagnostics`` block
+        (inference engine, trait provenance, per-kit scores, coverage, whether
+        a clarification round ran) plus a directive asking the agent to report
+        Quartermaster's impact after the task. Off by default.
     :returns: ``{engine, inferred_traits, confidence, coverage,
         broadening_recommended, kits, warnings}``; each kit carries
-        ``sections``, ``always_load_markdown`` and ``fetch_on_demand``.
+        ``sections``, ``always_load_markdown`` and ``fetch_on_demand``. When
+        *include_diagnostics* is set, also ``_diagnostics``.
     :raises ValueError: If *task* is empty and the client cannot be asked to
         clarify (no elicitation support).
     """
@@ -618,9 +677,11 @@ async def resolve_kits(
 
     # One clarification round on a weak match: ask for detail, then re-resolve
     # with the enriched task. Declining keeps the best-effort first result.
+    clarification_used = False
     if can_elicit and _is_low_confidence(result, settings):
         extra = await _elicit_text(ctx, _LOW_CONFIDENCE_ELICIT)
         if extra:
+            clarification_used = True
             result = await _resolve_once(
                 f"{task}\n{extra}",
                 ctx=ctx,
@@ -629,6 +690,11 @@ async def resolve_kits(
                 limit=limit,
                 max_sections_per_kit=max_sections_per_kit,
             )
+
+    if include_diagnostics:
+        result["_diagnostics"] = _build_diagnostics(
+            result, clarification_used=clarification_used
+        )
 
     return result
 

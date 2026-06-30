@@ -256,5 +256,123 @@ def test_low_confidence_no_reresolve_when_user_declines(monkeypatch) -> None:
     assert result["confidence"] == 0.1
 
 
+# ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+
+def _full_result() -> dict:
+    return {
+        "engine": "sampling",
+        "inferred_traits": {
+            "languages": ["python"],
+            "frameworks": ["fastapi"],
+            "capabilities": ["authentication"],
+            "contexts": [],
+            "provenance": [
+                {
+                    "category": "capabilities",
+                    "value": "authentication",
+                    "source": "sampling",
+                }
+            ],
+        },
+        "confidence": 0.82,
+        "coverage": 0.75,
+        "broadening_recommended": False,
+        "kits": [
+            {
+                "name": "module-auth-oidc",
+                "version": "v1",
+                "score": 92,
+                "confidence": "high",
+                "reasons": ["match:capabilities"],
+                "summary": "OIDC auth",
+                "sections": [],
+                "always_load_markdown": "",
+                "fetch_on_demand": [],
+            }
+        ],
+        "warnings": [],
+    }
+
+
+def test_include_diagnostics_attaches_diagnostics_block(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    monkeypatch.setattr("app.main._resolve_kits", lambda **k: _full_result())
+
+    result = _run(tool.fn(task="add JWT auth", include_diagnostics=True))
+
+    diag = result["_diagnostics"]
+    assert diag["engine"] == "sampling"
+    assert diag["coverage"] == 0.75
+    assert diag["selection_confidence"] == 0.82
+    assert diag["clarification_used"] is False
+    assert diag["trait_provenance"] == [
+        {
+            "category": "capabilities",
+            "value": "authentication",
+            "source": "sampling",
+        }
+    ]
+    assert diag["kit_scores"] == [
+        {
+            "name": "module-auth-oidc",
+            "score": 92,
+            "confidence": "high",
+            "reasons": ["match:capabilities"],
+        }
+    ]
+    assert "Quartermaster Insights" in diag["report_instruction"]
+
+
+def test_diagnostics_absent_by_default(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    monkeypatch.setattr("app.main._resolve_kits", lambda **k: _full_result())
+
+    result = _run(tool.fn(task="add JWT auth"))
+
+    assert "_diagnostics" not in result
+
+
+def test_diagnostics_reports_clarification_used(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    calls: list[str] = []
+
+    async def _fake_resolve_once(task, **kwargs):
+        calls.append(task)
+        if len(calls) == 1:
+            return {
+                **_full_result(),
+                "confidence": 0.1,
+                "broadening_recommended": True,
+                "inferred_traits": {
+                    "languages": [],
+                    "frameworks": [],
+                    "capabilities": [],
+                    "contexts": [],
+                    "provenance": [],
+                },
+            }
+        return _full_result()
+
+    async def _fake_elicit(ctx, message):
+        return "python fastapi backend"
+
+    monkeypatch.setattr("app.main._resolve_once", _fake_resolve_once)
+    monkeypatch.setattr("app.main._elicit_text", _fake_elicit)
+
+    result = _run(
+        tool.fn(
+            task="do stuff",
+            include_diagnostics=True,
+            ctx=_FakeCtx(elicitation=True),
+        )
+    )
+
+    assert len(calls) == 2
+    assert result["_diagnostics"]["clarification_used"] is True
+
+
 def test_instructions_point_at_one_shot_tool() -> None:
     assert "resolve_kits" in MCP_INSTRUCTIONS
