@@ -4,6 +4,76 @@ from __future__ import annotations
 
 _PROMPTS: list[dict[str, str]] = [
     {
+        "name": "greet",
+        "title": "Meet Quartermaster",
+        "intent": (
+            "Introduce Quartermaster to a coding agent connecting for the "
+            "first time: what it is, how to load kits, and where to go next."
+        ),
+        "prompt_template": (
+            "You are connected to **Quartermaster**, a self-hosted MCP server "
+            "that serves versioned AI *instruction kits* on demand.\n\n"
+            "What it is: kits are agent-facing guidance for specific "
+            "architecture, tooling, and capability choices (for example local "
+            "auth, OIDC, a FastAPI + Vuetify stack). Kits are loaded as extra "
+            "context per task and are never copied into the target project, so "
+            "the repo stays clean and you always get the latest guidance. Load "
+            "kits per task, not once per project — the traits a task touches "
+            "often only emerge mid-conversation.\n\n"
+            "How to load kits:\n"
+            "1. Fast path (start here): call `resolve_kits(task=\"…\")` with a "
+            "plain-language description of the work. It maps the task to "
+            "traits, ranks the matching kits, and returns the recommendation "
+            "with each kit's `always_load` sections already inlined. Pull "
+            "anything listed under `fetch_on_demand` with "
+            "`get_kit(name, sections=[…])` when you reach that aspect.\n"
+            "2. Manual path (finer control): `list_available_traits` -> "
+            "`select_kits` -> `get_kit_outline` -> `get_kit(sections=[…])` "
+            "when you have already mapped the task to explicit traits or want "
+            "ranking diagnostics.\n\n"
+            "Discover more: call `list_prompts` to see the guided workflows "
+            "available (bootstrapping, legacy assessment, tech-debt "
+            "modernization, and more).\n\n"
+            "Integrate Quartermaster into this project: call "
+            "`get_prompt('integrate_project')` and follow the returned steps "
+            "to wire it into the project's agent-instruction files."
+        ),
+    },
+    {
+        "name": "integrate_project",
+        "title": "Integrate Quartermaster Into This Project",
+        "intent": (
+            "Wire Quartermaster into the host project's agent-instruction "
+            "files so future agents know to use it for kit discovery."
+        ),
+        "prompt_template": (
+            "Integrate Quartermaster into this project's agent instructions. "
+            "Follow these steps:\n\n"
+            "1. Scan the project root for any of these agent-instruction files "
+            "(more than one may exist): `CLAUDE.md`, `AGENTS.md`, "
+            "`.cursorrules`, `.windsurfrules`, "
+            "`.github/copilot-instructions.md`, `GEMINI.md`.\n"
+            "2. For each file found, add the following paragraph near the top "
+            "(after any existing preamble), under a `## Quartermaster` heading "
+            "if the file uses headings:\n\n"
+            "   > When Quartermaster is available, treat its published trait "
+            "vocabulary and bootstrap guidance as the source of truth for kit "
+            "discovery; normalize user intent to supported traits before "
+            "selection and retry when coverage is low.\n\n"
+            "3. If no matching file is found, offer the user a multiple-choice "
+            "selection of the typical options — `CLAUDE.md`, `AGENTS.md`, "
+            "`.cursorrules`, `.windsurfrules`, "
+            "`.github/copilot-instructions.md`, `GEMINI.md` — and create "
+            "whichever the user picks.\n"
+            "4. Do not duplicate the paragraph if it is already present.\n"
+            "5. After writing, confirm to the user which file(s) were modified "
+            "and that Quartermaster is now wired in.\n\n"
+            "The paragraph is intentionally minimal — it tells future agents "
+            "to use Quartermaster without hard-coding a kit list. Do not "
+            "expand or paraphrase it."
+        ),
+    },
+    {
         "name": "trait_selection_bootstrap",
         "title": "Quartermaster Trait-Selection Bootstrap",
         "intent": (
