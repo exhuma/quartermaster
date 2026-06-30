@@ -6,7 +6,9 @@ Three endpoints with distinct semantics:
 - ``GET /readyz`` — readiness to serve core traffic; checks only the required
   dependency (the kit catalog at ``kits_root``).
 - ``GET /healthz`` — summarized operational health; adds the optional Keycloak
-  JWKS reachability check and degrades (rather than fails) when it is down.
+  JWKS reachability check and, when OTLP export is configured, a passive
+  per-signal telemetry-export check (reflecting the SDK's last real export, so
+  the probe sends nothing). Both degrade (rather than fail) when unhealthy.
 
 Payloads are security-minimized: no secrets, hostnames, ports, versions, or
 exception text — only abstract, stable ``reason_code`` values. Status maps to
@@ -22,6 +24,7 @@ import httpx
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app import telemetry
 from app.auth import _build_ssl_context
 from app.config import Settings, get_settings
 
@@ -105,6 +108,37 @@ def _check_keycloak(settings: Settings) -> ComponentHealth:
     )
 
 
+def _check_otlp() -> list[ComponentHealth]:
+    """Report OTLP export health per configured signal (passive).
+
+    Reads the outcome of the SDK's most recent real export — the probe sends
+    nothing itself. Returns one optional component per OTLP signal that has an
+    exporter installed (empty when OTLP is not configured). An export that has
+    not happened yet is reported ``ok`` (``no_data_yet``) rather than failing,
+    since the batch processors for traces/logs only export when there is
+    activity; only an actual export *failure* degrades health.
+    """
+    components: list[ComponentHealth] = []
+    for entry in telemetry.export_health():
+        ok = entry["ok"]
+        if ok is False:
+            status, reason = FAIL, "export_failed"
+        elif ok is True:
+            status, reason = OK, "ok"
+        else:
+            status, reason = OK, "no_data_yet"
+        components.append(
+            ComponentHealth(
+                name=f"telemetry-{entry['signal']}",
+                kind="exporter",
+                required=False,
+                status=status,
+                reason_code=reason,
+            )
+        )
+    return components
+
+
 def _http_status(status: str) -> int:
     """Map an endpoint status to its HTTP status code."""
     return 503 if status == FAIL else 200
@@ -147,7 +181,11 @@ async def readyz() -> JSONResponse:
 async def healthz() -> JSONResponse:
     """Summarized health — required plus optional (Keycloak) dependencies."""
     settings = get_settings()
-    components = [_check_kits_root(settings), _check_keycloak(settings)]
+    components = [
+        _check_kits_root(settings),
+        _check_keycloak(settings),
+        *_check_otlp(),
+    ]
     required_bad = any(
         c.required and c.status in (FAIL, UNKNOWN) for c in components
     )
