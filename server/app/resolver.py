@@ -218,6 +218,26 @@ def _build_trait_engines() -> list[TraitEngine]:
     return engines
 
 
+def build_ranker() -> TraitEngine:
+    """
+    Return the deterministic section ranker for a sampled/pre-inferred resolve.
+
+    When trait inference is supplied externally (e.g. by MCP sampling in the
+    tool wrapper), the resolver still needs to rank sections. Prefer the
+    embedding engine when available; otherwise the always-present lexical
+    floor. Mirrors the ranker the LLM engine uses, so an externally-inferred
+    resolve ranks sections exactly like the configured-LLM path.
+
+    :returns: A :class:`TraitEngine` exposing ``rank_sections``.
+    """
+    for engine in _build_trait_engines():
+        # The embedding engine (if built) is the deterministic ranker; the LLM
+        # engine delegates ranking to it anyway, so either is acceptable.
+        if engine.name == "embedding":
+            return engine
+    return LexicalTraitEngine()
+
+
 def _infer(
     task: str, vocab: TraitVocabulary
 ) -> tuple[TraitEngine, InferredTraits]:
@@ -264,6 +284,8 @@ def resolve_kits(
     broaden: bool = False,
     limit: int = 8,
     max_sections_per_kit: int = 8,
+    pre_inferred: InferredTraits | None = None,
+    section_ranker: TraitEngine | None = None,
 ) -> dict[str, Any]:
     """
     Resolve a natural-language task to recommended kits and content.
@@ -273,6 +295,12 @@ def resolve_kits(
     :param limit: Maximum number of candidate kits to return.
     :param max_sections_per_kit: Cap on non-``always_load`` sections offered
         for on-demand fetch per kit.
+    :param pre_inferred: Externally-inferred traits (e.g. from MCP sampling in
+        the tool wrapper). When supplied, the internal inference chain is
+        skipped and these traits drive selection.
+    :param section_ranker: Section ranker to use with *pre_inferred*. Defaults
+        to :func:`build_ranker` (embedding engine or lexical floor). Ignored
+        when *pre_inferred* is ``None``.
     :returns: The hybrid response described in this module's docstring.
     :raises ValueError: If *task* is empty.
     """
@@ -282,7 +310,11 @@ def resolve_kits(
 
     with telemetry.span("resolve.infer") as infer_span:
         vocab = load_vocabulary()
-        engine, inferred = _infer(task, vocab)
+        if pre_inferred is not None:
+            inferred = pre_inferred
+            ranker = section_ranker or build_ranker()
+        else:
+            ranker, inferred = _infer(task, vocab)
         telemetry.set_attrs(
             infer_span,
             {
@@ -320,7 +352,7 @@ def resolve_kits(
             always = [r for r in refs if r.always_load]
             rest = [r for r in refs if not r.always_load]
 
-            ranked = engine.rank_sections(task, rest)
+            ranked = ranker.rank_sections(task, rest)
             relevance_by_id = {r.section_id: score for r, score in ranked}
             relevant = [
                 (r, score) for r, score in ranked if score > 0

@@ -249,6 +249,18 @@ class Settings(BaseSettings):
     :param llm_api_key: API key/token for the configured LLM backend.
     :param llm_timeout_seconds: Per-request timeout for LLM calls; on
         timeout the resolver falls back to embeddings, then lexical.
+    :param sampling_enabled: When true (default), ``resolve_kits`` prefers MCP
+        sampling (the connecting client's own LLM) for trait inference when the
+        client supports it, ahead of the configured HTTP LLM / embeddings /
+        lexical chain. Set false to never sample.
+    :param elicitation_enabled: When true (default), ``resolve_kits`` asks the
+        user (via MCP elicitation) to disambiguate an empty or low-confidence
+        task when the client supports it, instead of silently degrading. Set
+        false to preserve the legacy empty-task ``ValueError`` / best-effort
+        behaviour.
+    :param resolve_elicit_min_confidence: Selection-confidence threshold below
+        which ``resolve_kits`` will elicit clarification (when elicitation is
+        supported and enabled). Higher values elicit more eagerly.
     :param metrics_prometheus_enabled: When true, mount a ``GET /metrics``
         Prometheus pull endpoint (requires the ``telemetry`` extra). OTLP
         push is configured separately via the standard ``OTEL_*`` env vars
@@ -315,6 +327,15 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     llm_api_key: str | None = None
     llm_timeout_seconds: float = 8.0
+    # MCP sampling + elicitation for the one-shot ``resolve_kits`` tool. When
+    # the connecting client supports them, sampling is the preferred trait
+    # engine (borrows the client's own LLM, no QM_LLM_PROVIDER needed) and
+    # elicitation disambiguates empty/low-confidence tasks. Both degrade
+    # gracefully to the deterministic chain when the client cannot service
+    # them, and either can be disabled here.
+    sampling_enabled: bool = True
+    elicitation_enabled: bool = True
+    resolve_elicit_min_confidence: float = 0.25
     # Observability (OpenTelemetry metrics + traces). OTLP push is driven by
     # the standard OTEL_* env vars read by the SDK directly; only the
     # Prometheus pull endpoint and its auth posture are Quartermaster toggles.

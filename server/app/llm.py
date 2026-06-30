@@ -195,6 +195,53 @@ def _build_user_prompt(task: str, vocab: TraitVocabulary) -> str:
     return "\n".join(lines)
 
 
+def _constrain_to_vocab(
+    data: Any, vocab: TraitVocabulary, *, engine: str
+) -> InferredTraits | None:
+    """
+    Constrain a model's raw trait object to the closed vocabulary.
+
+    Shared by the LLM and sampling engines: the model is never trusted, so
+    each emitted value must match a known vocabulary token (case-insensitive)
+    and is de-duplicated. Returns ``None`` when *data* is not an object or
+    nothing in-vocabulary survives, so the caller falls through to the next
+    engine.
+
+    :param data: The model's parsed JSON (expected to be an object).
+    :param vocab: The closed trait vocabulary to constrain against.
+    :param engine: Provenance/engine label to stamp on the result.
+    :returns: The constrained :class:`InferredTraits`, or ``None``.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    known_by_cat = vocab.all_by_category()
+    selected: dict[str, list[str]] = {}
+    provenance: list[InferredTrait] = []
+    for key in _TRAIT_KEYS:
+        raw = data.get(key, [])
+        if not isinstance(raw, list):
+            raw = []
+        allowed = set(known_by_cat[key])
+        kept: list[str] = []
+        for value in raw:
+            token = str(value).strip().lower()
+            if token in allowed and token not in kept:
+                kept.append(token)
+        selected[key] = kept
+        provenance += [InferredTrait(key, v, engine) for v in kept]
+
+    result = InferredTraits(
+        languages=selected["languages"],
+        frameworks=selected["frameworks"],
+        capabilities=selected["capabilities"],
+        contexts=selected["contexts"],
+        provenance=provenance,
+        engine=engine,
+    )
+    return result if result.has_any() else None
+
+
 class LLMTraitEngine:
     """
     Trait inference via an LLM, with deterministic section ranking.
@@ -229,36 +276,7 @@ class LLMTraitEngine:
             logger.warning("LLM inference failed: %s", exc)
             return None
 
-        if not isinstance(data, dict):
-            logger.warning("LLM returned a non-object payload; ignoring")
-            return None
-
-        known_by_cat = vocab.all_by_category()
-        selected: dict[str, list[str]] = {}
-        provenance: list[InferredTrait] = []
-        for key in _TRAIT_KEYS:
-            raw = data.get(key, [])
-            if not isinstance(raw, list):
-                raw = []
-            allowed = set(known_by_cat[key])
-            # Constrain to vocabulary (never trust the model) and dedupe.
-            kept: list[str] = []
-            for value in raw:
-                token = str(value).strip().lower()
-                if token in allowed and token not in kept:
-                    kept.append(token)
-            selected[key] = kept
-            provenance += [InferredTrait(key, v, self.name) for v in kept]
-
-        result = InferredTraits(
-            languages=selected["languages"],
-            frameworks=selected["frameworks"],
-            capabilities=selected["capabilities"],
-            contexts=selected["contexts"],
-            provenance=provenance,
-            engine=self.name,
-        )
-        return result if result.has_any() else None
+        return _constrain_to_vocab(data, vocab, engine=self.name)
 
     def rank_sections(
         self, task: str, refs: list[SectionRef]
