@@ -45,15 +45,13 @@ def _write_kit(base: Path) -> None:
     ]
     lines = ['summary = "Alpha summary."', ""]
     for section in sections:
-        (instr / section["file"]).write_text(
-            section["body"], encoding="utf-8"
-        )
+        (instr / section["file"]).write_text(section["body"], encoding="utf-8")
         lines += [
             "[[sections]]",
             f'file = "{section["file"]}"',
             f'title = "{section["title"]}"',
             f'gloss = "{section["gloss"]}"',
-            f'always_load = {"true" if section["always_load"] else "false"}',
+            f"always_load = {'true' if section['always_load'] else 'false'}",
             "",
         ]
     (instr / "index.toml").write_text("\n".join(lines), encoding="utf-8")
@@ -88,9 +86,7 @@ def _write_kit(base: Path) -> None:
 
 
 @pytest.fixture()
-def harness(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Any:
+def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Wire a catalog + in-memory OTEL providers and the lexical floor."""
     _write_kit(tmp_path)
     monkeypatch.setattr(
@@ -124,9 +120,7 @@ def _points(reader: InMemoryMetricReader) -> dict[str, list[Any]]:
     for resource_metric in data.resource_metrics:
         for scope_metric in resource_metric.scope_metrics:
             for metric in scope_metric.metrics:
-                out.setdefault(metric.name, []).extend(
-                    metric.data.data_points
-                )
+                out.setdefault(metric.name, []).extend(metric.data.data_points)
     return out
 
 
@@ -204,6 +198,67 @@ def test_no_task_text_in_metrics_or_spans(harness: Any) -> None:
     for span in exporter.get_finished_spans():
         for value in (span.attributes or {}).values():
             assert task not in str(value)
+
+
+class _FakeResult:
+    """Stand-in for an OTLP export-result enum member (has a ``.name``)."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeExporter:
+    """Exporter double whose ``export`` returns a queued result."""
+
+    def __init__(self, results: list[str]) -> None:
+        self._results = list(results)
+        self.calls: list[tuple] = []
+
+    def export(self, *args: Any, **kwargs: Any) -> _FakeResult:
+        self.calls.append(args)
+        return _FakeResult(self._results.pop(0))
+
+    def shutdown(self) -> None:
+        """Delegated-through attribute the proxy must expose."""
+
+
+def test_export_health_empty_without_otlp() -> None:
+    telemetry.reset_for_test()
+    assert telemetry.export_health() == []
+
+
+def test_wrapper_records_success_and_failure() -> None:
+    telemetry.reset_for_test()
+    inner = _FakeExporter(["SUCCESS", "FAILURE"])
+    wrapped = telemetry._wrap_exporter("metrics", inner)
+
+    # Configured-but-not-exported shows up immediately with ok=None.
+    health = telemetry.export_health()
+    assert health == [{"signal": "metrics", "ok": None, "age_seconds": None}]
+
+    wrapped.export({"some": "batch"})
+    assert telemetry.export_health()[0]["ok"] is True
+
+    wrapped.export({"some": "batch"})
+    entry = telemetry.export_health()[0]
+    assert entry["ok"] is False
+    assert entry["age_seconds"] is not None and entry["age_seconds"] >= 0.0
+    # Non-export attributes delegate to the wrapped exporter.
+    wrapped.shutdown()
+    assert inner.calls  # export was really delegated
+
+
+def test_wrapper_records_failure_on_exception() -> None:
+    telemetry.reset_for_test()
+
+    class _Boom:
+        def export(self, *args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("network down")
+
+    wrapped = telemetry._wrap_exporter("traces", _Boom())
+    with pytest.raises(RuntimeError):
+        wrapped.export(["span"])
+    assert telemetry.export_health()[0]["ok"] is False
 
 
 def test_records_are_noop_before_init() -> None:

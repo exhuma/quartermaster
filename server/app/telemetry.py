@@ -35,6 +35,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -111,6 +112,14 @@ _gap_requested: Any = None
 # Fingerprint-keyed catalog stats cache and a kit -> domains cache.
 _stats_cache: tuple[str, dict[str, _DomainStats]] | None = None
 _domains_cache: dict[str, list[str]] | None = None
+
+# Passive OTLP export health, read by ``/healthz``. One entry per OTLP signal
+# whose exporter is installed; the value records the outcome of the SDK's most
+# recent *real* export (the batch/periodic processors call ``export`` on their
+# own schedule — the health probe itself sends nothing). A key's presence means
+# an OTLP exporter exists for that signal; ``ok`` is ``None`` until the first
+# export attempt.
+_export_state: dict[str, _ExportState] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +198,111 @@ def _ensure_global_providers(settings: Any) -> None:
             handler = LoggingHandler(logger_provider=logger_provider)
             logging.getLogger().addHandler(handler)
             _logger_provider_set = True
+    active = [
+        s
+        for s, flag in [
+            ("metrics", _meter_provider_set),
+            ("traces", _tracer_provider_set),
+            ("logs", _logger_provider_set),
+        ]
+        if flag
+    ]
+    inactive = [
+        s
+        for s, flag in [
+            ("metrics", _meter_provider_set),
+            ("traces", _tracer_provider_set),
+            ("logs", _logger_provider_set),
+        ]
+        if not flag
+    ]
+    if active:
+        logger.info("OTLP signals active: %s", ", ".join(active))
+    if inactive:
+        logger.info(
+            "OTLP signals inactive (no endpoint configured): %s",
+            ", ".join(inactive),
+        )
+
+
+@dataclass
+class _ExportState:
+    """Most recent OTLP export outcome for one signal.
+
+    ``ok`` is ``None`` until the first export is attempted, then ``True`` /
+    ``False`` for the latest attempt. ``at`` is its wall-clock time.
+    """
+
+    ok: bool | None = None
+    at: float | None = None
+
+
+class _ResultRecordingExporter:
+    """Wrap an OTLP exporter to record the outcome of every export.
+
+    The SDK's batch/periodic processors call ``export`` on their own schedule;
+    we intercept the return value (and any exception) so ``/healthz`` can report
+    whether real telemetry is currently reaching the collector — the probe
+    itself never sends anything. All other attributes (``shutdown``,
+    ``force_flush``, the metric exporter's ``_preferred_*`` knobs the reader
+    reads at construction) delegate transparently to the wrapped exporter.
+    """
+
+    def __init__(self, signal: str, exporter: Any) -> None:
+        self._signal = signal
+        self._exporter = exporter
+
+    def export(self, *args: Any, **kwargs: Any) -> Any:
+        """Delegate the export, recording success/failure either way."""
+        success = False
+        try:
+            result = self._exporter.export(*args, **kwargs)
+            success = getattr(result, "name", None) == "SUCCESS"
+            return result
+        finally:
+            _record_export_result(self._signal, success)
+
+    def __getattr__(self, name: str) -> Any:
+        # Reached only for attributes not set on the wrapper itself; guard the
+        # backing field to avoid recursion before __init__ assigns it.
+        if name == "_exporter":
+            raise AttributeError(name)
+        return getattr(self._exporter, name)
+
+
+def _wrap_exporter(signal: str, exporter: Any) -> _ResultRecordingExporter:
+    """Register *signal* as OTLP-configured and wrap its exporter."""
+    _export_state[signal] = _ExportState()
+    return _ResultRecordingExporter(signal, exporter)
+
+
+def _record_export_result(signal: str, success: bool) -> None:
+    """Record the outcome of one real export (defensive; never raises)."""
+    state = _export_state.get(signal)
+    if state is None:
+        return
+    state.ok = success
+    state.at = time.time()
+
+
+def export_health() -> list[dict[str, Any]]:
+    """Return passive OTLP export health, one entry per configured signal.
+
+    Each entry is ``{"signal": str, "ok": bool | None, "age_seconds": float |
+    None}``; ``ok is None`` means no export has happened yet. Returns an empty
+    list when no OTLP exporter is configured. Consumed by ``app.health``.
+    """
+    now = time.time()
+    return [
+        {
+            "signal": signal,
+            "ok": state.ok,
+            "age_seconds": (
+                None if state.at is None else max(0.0, now - state.at)
+            ),
+        }
+        for signal, state in _export_state.items()
+    ]
 
 
 def _build_meter_provider(settings: Any) -> Any:
@@ -216,16 +330,17 @@ def _build_meter_provider(settings: Any) -> Any:
                 PeriodicExportingMetricReader,
             )
 
-            readers.append(
-                PeriodicExportingMetricReader(OTLPMetricExporter())
+            exporter = _wrap_exporter("metrics", OTLPMetricExporter())
+            readers.append(PeriodicExportingMetricReader(exporter))
+            logger.info(
+                "OTLP metrics exporter configured, endpoint: %s",
+                _effective_endpoint("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"),
             )
         except Exception:  # noqa: BLE001
             logger.warning("OTLP metric exporter setup failed", exc_info=True)
     if not readers:
         return None
-    return MeterProvider(
-        resource=_resource(), metric_readers=readers
-    )
+    return MeterProvider(resource=_resource(), metric_readers=readers)
 
 
 def _build_tracer_provider(settings: Any) -> Any:
@@ -238,7 +353,13 @@ def _build_tracer_provider(settings: Any) -> Any:
         )
 
         provider = TracerProvider(resource=_resource())
-        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        provider.add_span_processor(
+            BatchSpanProcessor(_wrap_exporter("traces", OTLPSpanExporter()))
+        )
+        logger.info(
+            "OTLP traces exporter configured, endpoint: %s",
+            _effective_endpoint("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+        )
         return provider
     except Exception:  # noqa: BLE001
         logger.warning("OTLP span exporter setup failed", exc_info=True)
@@ -256,7 +377,11 @@ def _build_logger_provider(settings: Any) -> Any:
 
         provider = LoggerProvider(resource=_resource())
         provider.add_log_record_processor(
-            BatchLogRecordProcessor(OTLPLogExporter())
+            BatchLogRecordProcessor(_wrap_exporter("logs", OTLPLogExporter()))
+        )
+        logger.info(
+            "OTLP logs exporter configured, endpoint: %s",
+            _effective_endpoint("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"),
         )
         return provider
     except Exception:  # noqa: BLE001
@@ -273,6 +398,20 @@ def _resource() -> Any:
     # metadata) so it matches the X-Quartermaster-Version header and the SPA.
     return Resource.create(
         {"service.name": "quartermaster", "service.version": app_version()}
+    )
+
+
+def _effective_endpoint(signal_var: str) -> str:
+    """Return the endpoint that the OTEL SDK will use for a given signal.
+
+    The SDK prefers the signal-specific var over the generic base endpoint.
+    Falls back to the SDK's compiled-in default when neither is set (which
+    only happens when Prometheus-only metrics are active).
+    """
+    return (
+        os.environ.get(signal_var)
+        or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        or "http://localhost:4318 (SDK default)"
     )
 
 
@@ -580,9 +719,7 @@ def record_resolve(
         _resolve_offered_tokens.record(offered_tokens)
         for category, values in traits.items():
             for value in values:
-                _trait_matched.add(
-                    1, {"category": category, "value": value}
-                )
+                _trait_matched.add(1, {"category": category, "value": value})
     except Exception:  # noqa: BLE001
         logger.debug("record_resolve failed", exc_info=True)
 
@@ -624,9 +761,7 @@ def set_attrs(span: Any, attributes: dict[str, Any] | None) -> None:
 
 
 @contextlib.contextmanager
-def span(
-    name: str, attributes: dict[str, Any] | None = None
-) -> Iterator[Any]:
+def span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[Any]:
     """
     Start a span as the current span, yielding it (or a no-op span).
 
@@ -679,3 +814,4 @@ def reset_for_test() -> None:
     _stats_cache = None
     _domains_cache = None
     _instr_meter = None
+    _export_state.clear()

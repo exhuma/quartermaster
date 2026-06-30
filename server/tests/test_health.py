@@ -130,3 +130,84 @@ def test_health_payload_has_no_secrets(monkeypatch, tmp_path) -> None:
     assert "https://" not in text
     assert str(tmp_path) not in text
     get_settings.cache_clear()
+
+
+def _otlp_components(resp) -> dict[str, dict]:
+    """Index a /healthz response's telemetry-* components by name."""
+    return {
+        c["name"]: c
+        for c in resp.json()["components"]
+        if c["name"].startswith("telemetry-")
+    }
+
+
+def test_healthz_no_otlp_component_when_unconfigured(
+    monkeypatch, tmp_path
+) -> None:
+    # With nothing exporting, no telemetry-* component appears.
+    from app import telemetry
+
+    monkeypatch.setattr(telemetry, "_export_state", {})
+    client = _make_client(monkeypatch, tmp_path, kits_exist=True)
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    assert _otlp_components(resp) == {}
+    get_settings.cache_clear()
+
+
+def test_healthz_otlp_ok_reported(monkeypatch, tmp_path) -> None:
+    from app import telemetry
+
+    monkeypatch.setattr(
+        telemetry,
+        "_export_state",
+        {"metrics": telemetry._ExportState(ok=True, at=1.0)},
+    )
+    client = _make_client(monkeypatch, tmp_path, kits_exist=True)
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    comp = _otlp_components(resp)["telemetry-metrics"]
+    assert comp["status"] == "ok"
+    assert comp["reason_code"] == "ok"
+    assert comp["required"] is False
+    get_settings.cache_clear()
+
+
+def test_healthz_degraded_when_otlp_export_failed(
+    monkeypatch, tmp_path
+) -> None:
+    from app import telemetry
+
+    monkeypatch.setattr(
+        telemetry,
+        "_export_state",
+        {"metrics": telemetry._ExportState(ok=False, at=1.0)},
+    )
+    client = _make_client(monkeypatch, tmp_path, kits_exist=True)
+    resp = client.get("/healthz")
+    # Optional telemetry export failing => degraded, still HTTP 200.
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "degraded"
+    assert _otlp_components(resp)["telemetry-metrics"]["status"] == "fail"
+    get_settings.cache_clear()
+
+
+def test_healthz_otlp_no_data_yet_is_ok(monkeypatch, tmp_path) -> None:
+    # A configured-but-not-yet-exported signal must not degrade health.
+    from app import telemetry
+
+    monkeypatch.setattr(
+        telemetry,
+        "_export_state",
+        {"traces": telemetry._ExportState(ok=None, at=None)},
+    )
+    client = _make_client(monkeypatch, tmp_path, kits_exist=True)
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    comp = _otlp_components(resp)["telemetry-traces"]
+    assert comp["status"] == "ok"
+    assert comp["reason_code"] == "no_data_yet"
+    get_settings.cache_clear()
