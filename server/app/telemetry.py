@@ -36,6 +36,7 @@ import contextlib
 import logging
 import os
 import time
+import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -59,7 +60,13 @@ try:
         set_logger_provider as _set_logger_provider,
     )
     from opentelemetry.metrics import Observation
-    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+
+    # NB: only the SDK's ``LoggingHandler`` is deprecated (opentelemetry-sdk
+    # 1.43+ tells you to use the one from opentelemetry-instrumentation-logging
+    # instead); ``LoggerProvider`` and ``BatchLogRecordProcessor`` are not, so
+    # they stay here. The stdlib-logging bridge handler is imported lazily in
+    # ``_build_logging_handler`` so log export can degrade independently.
+    from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
@@ -194,10 +201,15 @@ def _ensure_global_providers(settings: Any) -> None:
     if not _logger_provider_set:
         logger_provider = _build_logger_provider(settings)
         if logger_provider is not None:
-            _set_logger_provider(logger_provider)
-            handler = LoggingHandler(logger_provider=logger_provider)
-            logging.getLogger().addHandler(handler)
-            _logger_provider_set = True
+            handler = _build_logging_handler(logger_provider)
+            if handler is not None:
+                _set_logger_provider(logger_provider)
+                logging.getLogger().addHandler(handler)
+                _logger_provider_set = True
+            else:
+                # No handler to bridge stdlib logging -> OTLP: drop the logs
+                # signal so /healthz does not advertise a dead exporter.
+                _export_state.pop("logs", None)
     active = [
         s
         for s, flag in [
@@ -386,6 +398,35 @@ def _build_logger_provider(settings: Any) -> Any:
         return provider
     except Exception:  # noqa: BLE001
         logger.warning("OTLP log exporter setup failed", exc_info=True)
+        return None
+
+
+def _build_logging_handler(logger_provider: Any) -> Any:
+    """Return a stdlib-logging -> OTLP handler, or ``None`` if unavailable.
+
+    Prefers the handler from ``opentelemetry-instrumentation-logging``; the
+    SDK's own ``LoggingHandler`` is deprecated as of opentelemetry-sdk 1.43.
+    Falls back to the SDK handler (deprecation warning suppressed) when the
+    instrumentation package is not installed, so a slim deployment that only
+    has ``opentelemetry-sdk`` still exports its logs rather than silently
+    dropping them.
+    """
+    try:
+        from opentelemetry.instrumentation.logging.handler import (
+            LoggingHandler,
+        )
+
+        return LoggingHandler(logger_provider=logger_provider)
+    except ImportError:
+        pass
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from opentelemetry.sdk._logs import LoggingHandler as _SdkHandler
+
+            return _SdkHandler(logger_provider=logger_provider)
+    except Exception:  # noqa: BLE001
+        logger.warning("OTLP logging handler unavailable", exc_info=True)
         return None
 
 

@@ -9,6 +9,7 @@ are emitted — and that no task text leaks into either.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -259,6 +260,23 @@ def test_wrapper_records_failure_on_exception() -> None:
     with pytest.raises(RuntimeError):
         wrapped.export(["span"])
     assert telemetry.export_health()[0]["ok"] is False
+
+
+def test_logging_handler_uses_contrib_without_deprecation() -> None:
+    """The stdlib->OTLP bridge must use the non-deprecated contrib handler.
+
+    opentelemetry-sdk 1.43 deprecated its own ``LoggingHandler``; we must build
+    the one from opentelemetry-instrumentation-logging and emit no
+    ``DeprecationWarning`` doing so.
+    """
+    from opentelemetry.sdk._logs import LoggerProvider
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        handler = telemetry._build_logging_handler(LoggerProvider())
+
+    assert handler is not None
+    assert "instrumentation.logging" in type(handler).__module__
 
 
 def test_records_are_noop_before_init() -> None:
