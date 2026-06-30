@@ -21,6 +21,7 @@ from app.llm import (
     LLMError,
     LLMTraitEngine,
     OpenAICompatBackend,
+    _constrain_to_vocab,
     get_llm_backend,
 )
 from app.traits import TraitVocabulary
@@ -95,6 +96,57 @@ def test_get_llm_backend_anthropic_requires_key_and_model() -> None:
 
 def test_get_llm_backend_unknown_provider_is_none() -> None:
     assert get_llm_backend(_settings(llm_provider="weird")) is None
+
+
+# ---------------------------------------------------------------------------
+# _constrain_to_vocab (shared by LLM and sampling engines)
+# ---------------------------------------------------------------------------
+
+
+def test_constrain_keeps_only_in_vocabulary_tokens() -> None:
+    result = _constrain_to_vocab(
+        {"frameworks": ["fastapi", "djangoflask"], "languages": ["cobol"]},
+        _VOCAB,
+        engine="sampling",
+    )
+    assert result is not None
+    assert result.frameworks == ["fastapi"]
+    assert result.languages == []
+    assert result.engine == "sampling"
+    assert {p.provenance for p in result.provenance} == {"sampling"}
+
+
+def test_constrain_lowercases_and_dedupes() -> None:
+    result = _constrain_to_vocab(
+        {"frameworks": ["FastAPI", "fastapi"]}, _VOCAB, engine="llm"
+    )
+    assert result is not None
+    assert result.frameworks == ["fastapi"]
+
+
+def test_constrain_returns_none_when_nothing_in_vocabulary() -> None:
+    assert (
+        _constrain_to_vocab(
+            {"languages": ["cobol"]}, _VOCAB, engine="sampling"
+        )
+        is None
+    )
+
+
+def test_constrain_returns_none_on_non_dict() -> None:
+    assert _constrain_to_vocab(["nope"], _VOCAB, engine="llm") is None
+
+
+def test_constrain_tolerates_non_list_category() -> None:
+    result = _constrain_to_vocab(
+        {"frameworks": "fastapi", "languages": ["python"]},
+        _VOCAB,
+        engine="llm",
+    )
+    assert result is not None
+    # A non-list category is ignored, not crashed on.
+    assert result.frameworks == []
+    assert result.languages == ["python"]
 
 
 # ---------------------------------------------------------------------------

@@ -30,9 +30,11 @@ Start the server from the ``server/`` directory:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.logging_config import configure_logging
 
@@ -43,7 +45,7 @@ configure_logging()
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -84,8 +86,15 @@ from app.requests import (
     check_existing_kit_extension_issue as _check_existing_kit_extension_issue,
 )
 from app.requests import request_kit_extension as _request_kit_extension
+from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
 from app.routers import app_tokens, clients, integration, kits_admin, kits_layers
+from app.sampling import (
+    SamplingTraitEngine,
+    client_supports_elicitation,
+    client_supports_sampling,
+)
+from app.traits import load_vocabulary
 from app.storage.kit_writes import KitPathError
 from app.tokens import count_tokens
 from app.user_agent import UserAgentMiddleware
@@ -255,6 +264,38 @@ def get_prompt(name: str) -> dict:
         raise ValueError(f"Prompt not found: {name!r}") from exc
 
 
+def _register_canned_prompts() -> None:
+    """
+    Register the canned templates as native FastMCP ``@mcp.prompt``s.
+
+    MCP-spec prompts are *user-initiated* — clients surface them as slash
+    commands / prompt galleries. The same templates remain available to
+    autonomous agents through the ``list_prompts``/``get_prompt`` tools above;
+    :mod:`app.prompts` is the single source of truth for both surfaces.
+    """
+    from fastmcp.prompts.prompt import Prompt
+
+    for canned in _list_canned_prompts():
+        template = canned["prompt_template"]
+
+        # Bind the template per-iteration via a default arg so each prompt
+        # function returns its own text (avoids late-binding closure capture).
+        def _render(_template: str = template) -> str:
+            return _template
+
+        mcp.add_prompt(
+            Prompt.from_function(
+                _render,
+                name=canned["name"],
+                title=canned["title"],
+                description=canned["intent"],
+            )
+        )
+
+
+_register_canned_prompts()
+
+
 # GitHub-backed tools. Defined unconditionally but only registered with the
 # MCP when GitHub is configured (see the registration block below), so a
 # self-hosted instance with no GitHub credentials never exposes — or reaches
@@ -368,12 +409,147 @@ def select_kits(
     )
 
 
+def _settings_or_none() -> Any:
+    """Return the Settings singleton, or ``None`` if config is incomplete."""
+    try:
+        return get_settings()
+    except ValidationError:
+        return None
+
+
+async def _infer_via_sampling(
+    task: str, ctx: Context, settings: Any
+) -> Any:
+    """
+    Infer traits via MCP sampling, or ``None`` to fall back to the chain.
+
+    Returns ``None`` (no sampling) when disabled in settings, when the client
+    does not advertise the sampling capability, or when the sample yields no
+    in-vocabulary traits. Never raises — the engine swallows its own failures.
+
+    :param task: The free-text task description.
+    :param ctx: The active FastMCP request context.
+    :param settings: The Settings singleton, or ``None`` when unconfigured.
+    :returns: ``InferredTraits`` from sampling, or ``None``.
+    """
+    if settings is not None and not getattr(settings, "sampling_enabled", True):
+        return None
+    if not client_supports_sampling(ctx):
+        return None
+    vocab = await asyncio.to_thread(load_vocabulary)
+    traits = await SamplingTraitEngine().infer_async(task, vocab, ctx)
+    if traits is not None and traits.has_any():
+        return traits
+    return None
+
+
+async def _resolve_once(
+    task: str,
+    *,
+    ctx: Context | None,
+    settings: Any,
+    broaden: bool,
+    limit: int,
+    max_sections_per_kit: int,
+) -> dict:
+    """
+    Run one resolution: sampling inference (if available) + sync assembly.
+
+    Sampling is preferred when the client supports it; otherwise the resolver
+    runs its own deterministic chain. The synchronous resolver (and its
+    blocking LLM/embedding/file I/O) runs in a worker thread so this async
+    path never stalls the event loop.
+    """
+    pre_inferred = None
+    section_ranker = None
+    if ctx is not None:
+        pre_inferred = await _infer_via_sampling(task, ctx, settings)
+        if pre_inferred is not None:
+            section_ranker = await asyncio.to_thread(build_ranker)
+
+    return await asyncio.to_thread(
+        _resolve_kits,
+        task=task,
+        broaden=broaden,
+        limit=limit,
+        max_sections_per_kit=max_sections_per_kit,
+        pre_inferred=pre_inferred,
+        section_ranker=section_ranker,
+    )
+
+
+_EMPTY_TASK_ELICIT = (
+    "What do you want to build or change? Describe the task in a sentence or "
+    "two so I can recommend the right instruction kits (mention the language, "
+    "framework, or capability if you know them)."
+)
+_LOW_CONFIDENCE_ELICIT = (
+    "I couldn't confidently match kits to that request. Which language, "
+    "framework, or capability does it involve? Add any detail that would "
+    "narrow it down."
+)
+
+
+async def _elicit_text(ctx: Context | None, message: str) -> str | None:
+    """
+    Ask the user a free-text question via MCP elicitation.
+
+    :returns: The user's text, or ``None`` when there is no context, they
+        decline/cancel, or the call fails (elicitation must never break
+        resolution).
+    """
+    if ctx is None:
+        return None
+    try:
+        # FastMCP wraps a primitive ``str`` response in a single-field object
+        # and unwraps it back to a str on ``.data``. (Its @overload set has a
+        # known resolution quirk for primitives, hence the type-ignore.)
+        result = await ctx.elicit(
+            message,
+            response_type=str,  # type: ignore[arg-type]
+        )
+    except Exception as exc:  # elicitation must never break resolution
+        logger.warning("elicitation failed: %s", exc)
+        return None
+    # AcceptedElicitation carries ``.data``; Declined/Cancelled do not.
+    data = getattr(result, "data", None)
+    if data is None:
+        return None
+    text = str(data).strip()
+    return text or None
+
+
+def _is_low_confidence(result: dict, settings: Any) -> bool:
+    """
+    Return whether a resolve result is too weak to return without clarifying.
+
+    Low confidence means either nothing was inferred at all, or the scorer
+    recommended broadening *and* confidence fell below the configured floor.
+    """
+    traits = result.get("inferred_traits", {})
+    has_traits = any(
+        traits.get(key)
+        for key in ("languages", "frameworks", "capabilities", "contexts")
+    )
+    if not has_traits:
+        return True
+    threshold = 0.25
+    if settings is not None:
+        threshold = getattr(
+            settings, "resolve_elicit_min_confidence", threshold
+        )
+    return bool(result.get("broadening_recommended")) and (
+        result.get("confidence", 1.0) < threshold
+    )
+
+
 @mcp.tool
-def resolve_kits(
+async def resolve_kits(
     task: str,
     broaden: bool = False,
     limit: int = 8,
     max_sections_per_kit: int = 8,
+    ctx: Context | None = None,
 ) -> dict:
     """
     Resolve a free-text task to ranked kits with core content inlined.
@@ -387,10 +563,11 @@ def resolve_kits(
     returned under ``fetch_on_demand`` to pull later via
     ``get_kit(name, sections=[…])``.
 
-    Trait inference is deterministic by default (local embeddings with a
-    lexical floor) and uses a configured LLM when available; the ``engine``
-    field reports which produced the result. Use ``select_kits`` directly
-    when you have already mapped the task to explicit traits.
+    Trait inference prefers MCP **sampling** (the connecting client's own LLM)
+    when the client supports it, then degrades to a configured HTTP LLM, local
+    embeddings, and a lexical floor; the ``engine`` field reports which
+    produced the result. Use ``select_kits`` directly when you have already
+    mapped the task to explicit traits.
 
     :param task: Natural-language description of the work to be done.
     :param broaden: Lower the selection threshold to widen recall.
@@ -400,14 +577,60 @@ def resolve_kits(
     :returns: ``{engine, inferred_traits, confidence, coverage,
         broadening_recommended, kits, warnings}``; each kit carries
         ``sections``, ``always_load_markdown`` and ``fetch_on_demand``.
-    :raises ValueError: If *task* is empty.
+    :raises ValueError: If *task* is empty and the client cannot be asked to
+        clarify (no elicitation support).
     """
-    return _resolve_kits(
-        task=task,
+    settings = _settings_or_none()
+    elicitation_on = settings is None or getattr(
+        settings, "elicitation_enabled", True
+    )
+    can_elicit = (
+        ctx is not None
+        and elicitation_on
+        and client_supports_elicitation(ctx)
+    )
+
+    task = (task or "").strip()
+    # Disambiguate an empty task up front rather than failing outright.
+    if not task and can_elicit:
+        clarified = await _elicit_text(ctx, _EMPTY_TASK_ELICIT)
+        if clarified:
+            task = clarified
+    if not task:
+        # No task and no way (or no willingness) to clarify: preserve the
+        # resolver's empty-task ValueError contract.
+        return await asyncio.to_thread(
+            _resolve_kits,
+            task=task,
+            broaden=broaden,
+            limit=limit,
+            max_sections_per_kit=max_sections_per_kit,
+        )
+
+    result = await _resolve_once(
+        task,
+        ctx=ctx,
+        settings=settings,
         broaden=broaden,
         limit=limit,
         max_sections_per_kit=max_sections_per_kit,
     )
+
+    # One clarification round on a weak match: ask for detail, then re-resolve
+    # with the enriched task. Declining keeps the best-effort first result.
+    if can_elicit and _is_low_confidence(result, settings):
+        extra = await _elicit_text(ctx, _LOW_CONFIDENCE_ELICIT)
+        if extra:
+            result = await _resolve_once(
+                f"{task}\n{extra}",
+                ctx=ctx,
+                settings=settings,
+                broaden=broaden,
+                limit=limit,
+                max_sections_per_kit=max_sections_per_kit,
+            )
+
+    return result
 
 
 @mcp.tool

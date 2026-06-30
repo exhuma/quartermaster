@@ -186,6 +186,41 @@ def test_max_sections_per_kit_bounds_on_demand_list() -> None:
     assert len(alpha["fetch_on_demand"]) <= 1
 
 
+def test_build_ranker_returns_a_section_ranker() -> None:
+    # With no embeddings/LLM configured (autouse fixture) the ranker is the
+    # lexical floor, but it always exposes the ranking contract.
+    ranker = resolver.build_ranker()
+    assert hasattr(ranker, "rank_sections")
+
+
+def test_pre_inferred_skips_inference_and_uses_provided_traits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*args, **kwargs):
+        raise AssertionError("_infer must not run when pre_inferred is given")
+
+    monkeypatch.setattr(resolver, "_infer", _boom)
+    pre = resolver.InferredTraits(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=[],
+        contexts=[],
+        provenance=[
+            resolver.InferredTrait("frameworks", "fastapi", "sampling")
+        ],
+        engine="sampling",
+    )
+    out = resolver.resolve_kits(task="anything", pre_inferred=pre)
+    assert out["engine"] == "sampling"
+    assert "fastapi" in out["inferred_traits"]["frameworks"]
+    sources = {p["source"] for p in out["inferred_traits"]["provenance"]}
+    assert sources == {"sampling"}
+    # The recommendation still assembles (sections ranked by the fallback
+    # ranker, content inlined).
+    alpha = {k["name"]: k for k in out["kits"]}["kit-alpha"]
+    assert "Keep it layered." in alpha["always_load_markdown"]
+
+
 def test_scorer_is_called_with_inferred_traits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
