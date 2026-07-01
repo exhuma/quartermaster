@@ -342,10 +342,17 @@ class LocalMetricsStore:
             for r in rows
         ]
 
-    def tokens_timeseries(self, cutoff: float) -> list[dict[str, Any]]:
-        """Per-UTC-day delivered vs offered tokens sent to clients."""
+    def tokens_timeseries(
+        self, cutoff: float, granularity: str = "1d"
+    ) -> list[dict[str, Any]]:
+        """Per-bucket delivered vs offered tokens sent to clients.
+
+        *granularity* selects the bucket size (``1h``/``1d``); the ``day`` key is
+        an opaque, sorted bucket label (a date, or ``YYYY-MM-DD HH:00`` hourly).
+        """
+        fmt = _GRANULARITY_FORMATS.get(granularity, _GRANULARITY_FORMATS["1d"])
         rows = self._query(
-            "SELECT strftime('%Y-%m-%d', ts, 'unixepoch') AS day, "
+            f"SELECT strftime('{fmt}', ts, 'unixepoch') AS day, "
             "disposition, COALESCE(SUM(tokens), 0) AS tokens "
             "FROM deliveries WHERE ts >= ? "
             "GROUP BY day, disposition ORDER BY day ASC",
@@ -465,33 +472,43 @@ class LocalMetricsStore:
             )
         return {"kits": kits, "cells": cells}
 
-    def catalog_growth(self, cutoff: float) -> dict[str, Any]:
-        """Per-day, per-domain catalog token mass, with delivered tokens overlaid.
+    def catalog_growth(
+        self, cutoff: float, granularity: str = "1d"
+    ) -> dict[str, Any]:
+        """Per-bucket, per-domain catalog token mass, with delivered overlaid.
 
         Tells the "flattening" story: catalog mass can climb per domain while
-        delivered volume for established domains stays flat.
+        delivered volume for established domains stays flat. Catalog snapshots
+        are stored once per UTC day, so under hourly *granularity* each day's
+        snapshot is forward-filled across that day's hourly buckets — the
+        catalog area holds flat while the delivered line moves — keeping both
+        series on one aligned x-axis.
         """
+        fmt = _GRANULARITY_FORMATS.get(granularity, _GRANULARITY_FORMATS["1d"])
         day_cutoff = time.strftime("%Y-%m-%d", time.gmtime(cutoff))
         snap_rows = self._query(
             "SELECT day, domain, total_tokens, always_load_tokens "
             "FROM catalog_snapshots WHERE day >= ? ORDER BY day ASC",
             (day_cutoff,),
         )
-        catalog: list[dict[str, Any]] = [
-            {
-                "day": r["day"],
-                "domain": r["domain"],
-                "total_tokens": r["total_tokens"],
-                "always_load_tokens": r["always_load_tokens"],
-            }
-            for r in snap_rows
-        ]
+        if granularity == "1h":
+            catalog = self._catalog_snapshots_hourly(snap_rows, cutoff)
+        else:
+            catalog = [
+                {
+                    "day": r["day"],
+                    "domain": r["domain"],
+                    "total_tokens": r["total_tokens"],
+                    "always_load_tokens": r["always_load_tokens"],
+                }
+                for r in snap_rows
+            ]
 
-        # Delivered tokens per day per domain: map kit -> domains at query time
-        # (the catalog is small) since deliveries carry no domain column.
+        # Delivered tokens per bucket per domain: map kit -> domains at query
+        # time (the catalog is small) since deliveries carry no domain column.
         kit_to_domains = _kit_domain_map()
         del_rows = self._query(
-            "SELECT strftime('%Y-%m-%d', ts, 'unixepoch') AS day, kit, "
+            f"SELECT strftime('{fmt}', ts, 'unixepoch') AS day, kit, "
             "COALESCE(SUM(tokens), 0) AS tokens FROM deliveries "
             "WHERE ts >= ? AND disposition IN "
             "('inlined', 'full', 'sections') GROUP BY day, kit",
@@ -508,6 +525,39 @@ class LocalMetricsStore:
             for (day, domain), tokens in sorted(delivered.items())
         ]
         return {"catalog": catalog, "delivered": delivered_series}
+
+    @staticmethod
+    def _catalog_snapshots_hourly(
+        snap_rows: list[Any], cutoff: float
+    ) -> list[dict[str, Any]]:
+        """Forward-fill daily catalog snapshots across hourly buckets.
+
+        Steps ``cutoff → now`` in whole hours and emits, for each hourly bucket,
+        the snapshot of the UTC day it falls in — so the catalog area stays flat
+        within a day while aligning to the hourly delivered series.
+        """
+        by_day: dict[str, list[Any]] = {}
+        for r in snap_rows:
+            by_day.setdefault(r["day"], []).append(r)
+        if not by_day:
+            return []
+        out: list[dict[str, Any]] = []
+        now = time.time()
+        step = int(cutoff - (cutoff % 3600))  # align to top of the hour
+        while step <= now:
+            day = time.strftime("%Y-%m-%d", time.gmtime(step))
+            bucket = time.strftime("%Y-%m-%d %H:00", time.gmtime(step))
+            for r in by_day.get(day, ()):
+                out.append(
+                    {
+                        "day": bucket,
+                        "domain": r["domain"],
+                        "total_tokens": r["total_tokens"],
+                        "always_load_tokens": r["always_load_tokens"],
+                    }
+                )
+            step += 3600
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +685,15 @@ _WINDOWS: dict[str, int] = {
     "30d": 30 * 86_400,
 }
 DEFAULT_WINDOW = "7d"
+
+# Time-series bucket sizes accepted by the API; each maps to the ``strftime``
+# format that groups a Unix timestamp into that bucket. Hourly is useful for
+# watching the 24h window evolve live; daily is the long-view default.
+_GRANULARITY_FORMATS: dict[str, str] = {
+    "1h": "%Y-%m-%d %H:00",
+    "1d": "%Y-%m-%d",
+}
+DEFAULT_GRANULARITY = "1d"
 
 
 def init(settings: Any) -> LocalMetricsStore | None:

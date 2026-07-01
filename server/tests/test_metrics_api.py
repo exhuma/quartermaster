@@ -80,6 +80,18 @@ def test_unknown_window_falls_back_to_default(client: TestClient) -> None:
     assert resp.json()["meta"]["window"] == local_store.DEFAULT_WINDOW
 
 
+def test_granularity_reflected_in_meta(client: TestClient) -> None:
+    resp = client.get("/api/metrics/overview?window=24h&granularity=1h")
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["granularity"] == "1h"
+
+
+def test_unknown_granularity_falls_back_to_default(client: TestClient) -> None:
+    resp = client.get("/api/metrics/overview?granularity=bogus")
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["granularity"] == local_store.DEFAULT_GRANULARITY
+
+
 def test_overview_without_store_still_serves(tmp_path: Path) -> None:
     # No store installed → event series empty, structural overlap still runs.
     local_store.reset_for_tests()

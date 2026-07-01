@@ -5,7 +5,7 @@ import { useTheme } from 'vuetify'
 import BaseChart from '@/components/BaseChart.vue'
 import ChartCard from '@/components/ChartCard.vue'
 import { useMetrics } from '@/composables/useMetrics'
-import type { MetricsWindow } from '@/types/metrics'
+import type { MetricsGranularity, MetricsWindow } from '@/types/metrics'
 import {
   catalogGrowthOption,
   heatmapOption,
@@ -16,7 +16,15 @@ import {
   toolLatencyOption,
 } from './metricsCharts'
 
-const { overview, error, window, fetchMetrics, setWindow } = useMetrics()
+const {
+  overview,
+  error,
+  window,
+  granularity,
+  fetchMetrics,
+  setWindow,
+  setGranularity,
+} = useMetrics()
 const theme = useTheme()
 // Vuetify types colours as string | number | <colour object>, but at runtime
 // these theme tokens are hex strings; coerce to the plain map the builders use.
@@ -115,6 +123,19 @@ const health = computed(() => overview.value?.resolve_health)
           {{ w.label }}
         </v-btn>
       </v-btn-toggle>
+      <v-switch
+        :model-value="granularity"
+        true-value="1h"
+        false-value="1d"
+        :label="granularity === '1h' ? 'Hourly' : 'Daily'"
+        color="primary"
+        density="compact"
+        hide-details
+        class="flex-grow-0"
+        @update:model-value="
+          (g) => setGranularity((g ?? '1d') as MetricsGranularity)
+        "
+      />
       <v-btn
         icon="mdi-refresh"
         variant="text"

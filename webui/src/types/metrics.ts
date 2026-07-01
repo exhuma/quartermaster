@@ -3,8 +3,13 @@
 
 export type MetricsWindow = '24h' | '7d' | '30d'
 
+// Time-series bucket size. '1h' is useful for watching the 24h window evolve
+// live; '1d' is the long-view default.
+export type MetricsGranularity = '1h' | '1d'
+
 export interface MetricsMeta {
   window: MetricsWindow
+  granularity: MetricsGranularity
   generated_at: number
   retention_days: number
   store_enabled: boolean

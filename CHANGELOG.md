@@ -8,6 +8,14 @@ project aims to follow semantic versioning.
 
 ### Added
 
+- Metrics dashboard time-series granularity toggle: a Hourly/Daily switch next
+  to the window selector re-buckets the "Tokens sent to clients" and "Catalog
+  growth" charts. The 24h window defaults to hourly (`1h`) buckets, the 7d/30d
+  windows to daily (`1d`); the switch overrides the default for the current
+  window. `GET /api/metrics/overview` gains a `granularity` (`1h`/`1d`) query
+  parameter (echoed in `meta.granularity`, falls back to `1d`). Daily catalog
+  snapshots are forward-filled across hourly buckets so both chart series stay
+  on one aligned x-axis.
 - Multi-root kit catalogs ("layers"): compose several catalogs as an ordered
   base → overlay stack via `QM_KIT_LAYERS_FILE` (a TOML layers file; relative
   paths resolve against the file's directory). Kit-level shadowing (the

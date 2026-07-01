@@ -54,12 +54,16 @@ def _otel_status() -> str:
     return "configured"
 
 
-def build_overview(window: str) -> dict[str, Any]:
+def build_overview(
+    window: str, granularity: str = local_store.DEFAULT_GRANULARITY
+) -> dict[str, Any]:
     """Assemble the dashboard bundle for the requested time *window*.
 
-    The effective window is capped to the store's retention. When the local
-    store is disabled/unavailable the event-derived series are empty, but the
-    static structural-overlap matrix is still computed from the catalog.
+    The effective window is capped to the store's retention. *granularity*
+    (``1h``/``1d``) sets the bucket size of the time-series (tokens + catalog
+    growth). When the local store is disabled/unavailable the event-derived
+    series are empty, but the static structural-overlap matrix is still
+    computed from the catalog.
     """
     window_seconds = local_store._WINDOWS.get(
         window, local_store._WINDOWS[local_store.DEFAULT_WINDOW]
@@ -73,11 +77,11 @@ def build_overview(window: str) -> dict[str, Any]:
     store = local_store.get_store()
     if store is not None:
         kit_usage = store.kit_usage(cutoff)
-        tokens_timeseries = store.tokens_timeseries(cutoff)
+        tokens_timeseries = store.tokens_timeseries(cutoff, granularity)
         resolve_health = store.resolve_health(cutoff)
         tool_latency = store.tool_latency(cutoff)
         co_occurrence = store.co_occurrence(cutoff)
-        catalog_growth = store.catalog_growth(cutoff)
+        catalog_growth = store.catalog_growth(cutoff, granularity)
     else:
         kit_usage = []
         tokens_timeseries = []
@@ -96,6 +100,7 @@ def build_overview(window: str) -> dict[str, Any]:
     return {
         "meta": {
             "window": window,
+            "granularity": granularity,
             "generated_at": now,
             "retention_days": retention,
             "store_enabled": store is not None,
@@ -117,8 +122,14 @@ def metrics_overview(
         default=local_store.DEFAULT_WINDOW,
         description="Time window: 24h, 7d, or 30d (capped to retention).",
     ),
+    granularity: str = Query(
+        default=local_store.DEFAULT_GRANULARITY,
+        description="Time-series bucket size: 1h or 1d.",
+    ),
 ) -> dict[str, Any]:
     """Return the aggregated metrics bundle for the Metrics dashboard."""
     if window not in local_store._WINDOWS:
         window = local_store.DEFAULT_WINDOW
-    return build_overview(window)
+    if granularity not in local_store._GRANULARITY_FORMATS:
+        granularity = local_store.DEFAULT_GRANULARITY
+    return build_overview(window, granularity)

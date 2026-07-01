@@ -22,6 +22,12 @@ export function palette(c: Colors): string[] {
 
 const round = (n: number, dp = 1): number => Number(n.toFixed(dp))
 
+// Keep time-series x-axis labels compact: hourly buckets arrive as
+// "YYYY-MM-DD HH:00" — show just "HH:00" so 24 of them fit; daily buckets
+// ("YYYY-MM-DD") are shown as-is. The full bucket stays in the axis tooltip.
+const bucketAxisLabel = (value: string): string =>
+  value.includes(' ') ? value.split(' ')[1] : value
+
 export function kitUsageOption(usage: KitUsage[], c: Colors): EChartsOption {
   // Horizontal bars, busiest on top. The API sorts busiest-first; ECharts
   // category axes render bottom-up, so reverse to put the top kit at the top.
@@ -51,6 +57,7 @@ export function tokensOption(points: TokenPoint[], c: Colors): EChartsOption {
       type: 'category',
       data: points.map((p) => p.day),
       boundaryGap: false,
+      axisLabel: { formatter: bucketAxisLabel },
     },
     yAxis: { type: 'value', name: 'tokens' },
     series: [
@@ -224,7 +231,12 @@ export function catalogGrowthOption(
     tooltip: { trigger: 'axis' },
     legend: { top: 0, type: 'scroll', textStyle: { fontSize: 10 } },
     grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
-    xAxis: { type: 'category', data: days, boundaryGap: false },
+    xAxis: {
+      type: 'category',
+      data: days,
+      boundaryGap: false,
+      axisLabel: { formatter: bucketAxisLabel },
+    },
     yAxis: { type: 'value', name: 'tokens' },
     series,
   }

@@ -91,6 +91,55 @@ def test_tokens_timeseries_splits_delivered_and_offered(
     assert series[0]["offered"] == 25
 
 
+def test_tokens_timeseries_hourly_vs_daily_buckets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1_000_000.0}  # 1970-01-12 13:46:40 UTC
+    monkeypatch.setattr(ls.time, "time", lambda: clock["now"])
+    s = ls.LocalMetricsStore(tmp_path / "m.db", retention_days=7)
+    s.init()
+
+    # Two deliveries an hour apart on the same UTC day.
+    s.record_delivery(kit="kit-a", disposition="full", tokens=10)
+    clock["now"] += 3600
+    s.record_delivery(kit="kit-a", disposition="full", tokens=20)
+
+    hourly = s.tokens_timeseries(0.0, "1h")
+    assert len(hourly) == 2  # two distinct hour buckets
+    assert sum(p["delivered"] for p in hourly) == 30
+
+    daily = s.tokens_timeseries(0.0, "1d")  # default granularity
+    assert len(daily) == 1  # collapsed to one day bucket
+    assert daily[0]["delivered"] == 30
+
+
+def test_catalog_growth_hourly_forward_fills_daily_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(ls.time, "time", lambda: clock["now"])
+    s = ls.LocalMetricsStore(tmp_path / "m.db", retention_days=7)
+    s.init()
+
+    day = ls.time.strftime("%Y-%m-%d", ls.time.gmtime(clock["now"]))
+    with s._lock:
+        s._conn.execute("DELETE FROM catalog_snapshots")
+        s._conn.execute(
+            "INSERT INTO catalog_snapshots "
+            "(day, domain, kits, sections, total_tokens, always_load_tokens) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (day, "testing", 1, 1, 500, 100),
+        )
+        s._conn.commit()
+
+    g = s.catalog_growth(0.0, "1h")
+    # The single daily snapshot is forward-filled across hourly buckets, each
+    # holding the day's value and labelled with an hourly ("day HH:00") bucket.
+    assert g["catalog"]
+    assert all(p["day"].startswith(day + " ") for p in g["catalog"])
+    assert all(p["total_tokens"] == 500 for p in g["catalog"])
+
+
 def test_resolve_health_mixes_and_broadening_rate(
     store: ls.LocalMetricsStore,
 ) -> None:
