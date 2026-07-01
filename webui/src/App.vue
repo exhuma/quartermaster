@@ -16,10 +16,16 @@ onMounted(refresh)
   <v-app>
     <v-app-bar color="primary" flat>
       <v-app-bar-title>Instruction Kits</v-app-bar-title>
-      <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
-      <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
-      <v-btn variant="text" :to="{ name: 'mount' }">Mount</v-btn>
-      <v-btn variant="text" :to="{ name: 'metrics' }">Metrics</v-btn>
+
+      <!-- Primary navigation, absolutely centered within the app bar so it
+           stays centered independent of the title/auth widths on either side. -->
+      <nav class="app-nav">
+        <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
+        <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
+        <v-btn variant="text" :to="{ name: 'mount' }">Mount</v-btn>
+        <v-btn variant="text" :to="{ name: 'metrics' }">Metrics</v-btn>
+      </nav>
+
       <v-spacer />
       <template v-if="isAuthenticated">
         <span class="mr-2 text-body-2">{{ displayName }}</span>
@@ -67,6 +73,16 @@ onMounted(refresh)
 </template>
 
 <style scoped>
+/* Primary nav centered within the app bar regardless of the differing
+   widths of the title (left) and auth controls (right). */
+.app-nav {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.25rem;
+}
+
 /* Low-visibility build-identity strip; full opacity on hover. */
 .build-meta-bar {
   opacity: 0.55;

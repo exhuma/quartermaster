@@ -21,7 +21,13 @@ beforeEach(() => {
 describe('useKits', () => {
   it('populates kits from the API', async () => {
     mockApi.get.mockResolvedValue([
-      { name: 'k', description: 'd', versions: ['v1'], latest_version: 'v1' },
+      {
+        name: 'k',
+        description: 'd',
+        versions: ['v1'],
+        latest_version: 'v1',
+        source_layer: 'base',
+      },
     ])
     const { kits, fetchKits } = useKits()
     await fetchKits()
