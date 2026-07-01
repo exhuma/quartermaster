@@ -324,13 +324,17 @@ def test_delete_kit_idempotent(kits_root: Path) -> None:
 
 
 @pytest.fixture()
-def client(kits_root: Path):
+def client(kits_root: Path, monkeypatch: pytest.MonkeyPatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     from app.main import _register_exception_handlers
     from app.media_types import VENDOR_MEDIA_TYPE
     from app.routers import kits_admin
+
+    # These tests cover CRUD behavior, not authorization (see test_authz.py);
+    # act as an editor so the write-gate dependency is satisfied.
+    monkeypatch.setattr("app.authz.is_editor", lambda _sub: True)
 
     app = FastAPI()
     app.include_router(kits_admin.router)

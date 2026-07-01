@@ -22,6 +22,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
+from app.authz import is_editor
 from app.config import Settings, get_settings
 from app.dev_auth import decode_dev_token
 from app.storage import app_tokens
@@ -105,6 +106,13 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 _PROTECTED_PREFIXES: tuple[str, ...] = ("/api", "/kits", "/dav")
 _DAV_PREFIX = "/dav"
 _METRICS_PATH = "/metrics"
+# WebDAV methods that mutate the catalog. Read/discovery methods
+# (GET/PROPFIND/OPTIONS/HEAD) stay open to any authenticated caller; these are
+# gated to editors so a consumer's app token cannot write via the DAV mount
+# (which bypasses the REST editor dependency entirely).
+_DAV_WRITE_METHODS: frozenset[str] = frozenset(
+    {"PUT", "DELETE", "MKCOL", "MOVE", "COPY", "PROPPATCH", "LOCK", "UNLOCK"}
+)
 
 
 def _requires_auth(path: str) -> bool:
@@ -124,6 +132,27 @@ def _requires_auth(path: str) -> bool:
 
 _COPILOT_CLIENT_ID_HEADER = "X-Client-Id"
 _COPILOT_CLIENT_SECRET_HEADER = "X-Client-Secret"
+
+
+def _set_identity(request: Request, sub: str, label: str) -> None:
+    """
+    Record the authenticated caller on the request for downstream consumers.
+
+    Writes three attributes onto ``request.state`` (backed by
+    ``scope["state"]``, which survives the dispatch into the mounted MCP app):
+
+    - ``auth_subject`` — kept for back-compat; now the stable ``sub`` so app
+      tokens minted going forward bind to the subject, not the username.
+    - ``auth_sub`` — the stable IdP subject; the key for ownership and roles.
+    - ``auth_label`` — a human-readable label for UIs and logs.
+
+    :param request: The incoming request.
+    :param sub: Stable subject identifier for the caller.
+    :param label: Human-readable label for the caller.
+    """
+    request.state.auth_subject = sub
+    request.state.auth_sub = sub
+    request.state.auth_label = label
 
 
 class IDPUnavailableError(Exception):
@@ -266,10 +295,16 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 decoded.get("sub", "unknown"),
                 decoded.get("scope", ""),
             )
-            # Expose the caller identity to routes (e.g. app-token minting).
-            request.state.auth_subject = (
-                decoded.get("preferred_username") or decoded.get("sub") or ""
+            # Expose the caller identity to routes (e.g. app-token minting)
+            # and, via scope["state"], to the mounted MCP app. Ownership and
+            # roles key on the stable ``sub``; the label is for UIs/logs only.
+            sub = decoded.get("sub") or ""
+            label = (
+                decoded.get("preferred_username")
+                or decoded.get("email")
+                or sub
             )
+            _set_identity(request, sub, label)
             return await call_next(request)
 
         if self._copilot_auth_enabled:
@@ -280,9 +315,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                         logger.debug(
                             "User authenticated via IDP-backed Copilot headers"
                         )
-                        request.state.auth_subject = request.headers.get(
+                        client_id = request.headers.get(
                             _COPILOT_CLIENT_ID_HEADER, ""
                         )
+                        _set_identity(request, client_id, client_id)
                         return await call_next(request)
                 except IDPUnavailableError:
                     return self._service_unavailable(
@@ -320,7 +356,21 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
         record = self._verify_basic_app_token(request)
         if record:
-            request.state.auth_subject = record["user"]
+            subject = record["user"]
+            _set_identity(request, subject, subject)
+            if (
+                request.method.upper() in _DAV_WRITE_METHODS
+                and not is_editor(subject)
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": (
+                            "Editing the shared kit catalog requires the "
+                            "'editor' role."
+                        )
+                    },
+                )
             return await call_next(request)
         return self._basic_unauthorized()
 
@@ -343,7 +393,8 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         """
         record = self._verify_basic_app_token(request)
         if record:
-            request.state.auth_subject = record["user"]
+            subject = record["user"]
+            _set_identity(request, subject, subject)
             return await call_next(request)
         return self._basic_unauthorized()
 

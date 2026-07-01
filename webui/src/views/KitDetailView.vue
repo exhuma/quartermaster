@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { useKitEditor } from '@/composables/useKitEditor'
+import { useMe } from '@/composables/useMe'
 import FieldHelp from '@/components/FieldHelp.vue'
 import { applicabilityHelp } from '@/constants/fieldHelp'
 import type {
@@ -14,6 +15,7 @@ import type {
 const props = defineProps<{ name: string }>()
 
 const editor = useKitEditor()
+const { isEditor, fetchMe } = useMe()
 
 const detail = ref<KitDetail | null>(null)
 const manifest = reactive<Applicability>(emptyManifest())
@@ -55,6 +57,7 @@ function emptyManifest(): Applicability {
 }
 
 onMounted(async () => {
+  fetchMe()
   await editor.loadTraits()
   detail.value = await editor.getDetail(props.name)
   Object.assign(manifest, await editor.getApplicability(props.name))
@@ -110,6 +113,7 @@ async function runCompare(): Promise<void> {
               <v-chip class="mr-2" variant="tonal">{{ v }}</v-chip>
               <v-spacer />
               <v-btn
+                v-if="isEditor"
                 size="small"
                 variant="text"
                 color="primary"
@@ -305,9 +309,12 @@ async function runCompare(): Promise<void> {
           </v-card-text>
           <v-card-actions>
             <v-spacer />
-            <v-btn color="primary" @click="saveManifest">
+            <v-btn v-if="isEditor" color="primary" @click="saveManifest">
               Save applicability
             </v-btn>
+            <span v-else class="text-caption text-medium-emphasis">
+              Read-only — editor role required
+            </span>
           </v-card-actions>
         </v-card>
       </v-col>

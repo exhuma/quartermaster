@@ -766,6 +766,9 @@ def _make_client(
         "app.kits.get_settings",
         lambda: mock_settings,
     )
+    # These tests cover layer routing + status mapping, not authorization
+    # (see test_authz.py); act as an editor so the write-gate is satisfied.
+    monkeypatch.setattr("app.authz.is_editor", lambda _sub: True)
 
     app = FastAPI()
     app.include_router(kits_layers.router)

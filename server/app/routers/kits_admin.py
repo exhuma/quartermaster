@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel
 
 from app import kits as kits_mod
+from app.authz import require_editor
 from app.media_types import VendorJSONResponse, require_vendor_accept
 from app.services import kit_service as svc
 
@@ -100,7 +101,11 @@ def list_kits() -> list[dict[str, Any]]:
     return svc.list_kits()
 
 
-@router.post("/kits", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/kits",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
+)
 def create_kit(payload: KitCreate, response: Response) -> dict[str, Any]:
     """Create a kit with its initial version."""
     detail = svc.create_kit(
@@ -121,7 +126,11 @@ def get_kit(name: str) -> dict[str, Any]:
     return svc.get_kit_detail(name)
 
 
-@router.delete("/kits/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/kits/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
+)
 def delete_kit(name: str) -> Response:
     """Delete a kit and all its versions (idempotent)."""
     svc.delete_kit(name)
@@ -139,7 +148,10 @@ def get_applicability(name: str) -> dict[str, Any]:
     return svc.get_applicability(name)
 
 
-@router.put("/kits/{name}/applicability")
+@router.put(
+    "/kits/{name}/applicability",
+    dependencies=[Depends(require_editor)],
+)
 def replace_applicability(
     name: str, applicability: dict[str, Any]
 ) -> dict[str, Any]:
@@ -159,7 +171,9 @@ def list_versions(name: str) -> list[str]:
 
 
 @router.post(
-    "/kits/{name}/versions", status_code=status.HTTP_201_CREATED
+    "/kits/{name}/versions",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
 )
 def create_version(
     name: str, payload: VersionCreate, response: Response
@@ -180,6 +194,7 @@ def create_version(
 @router.delete(
     "/kits/{name}/versions/{version}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
 )
 def delete_version(name: str, version: str) -> Response:
     """Delete one major version of a kit (idempotent, 204 no body)."""
@@ -206,7 +221,10 @@ def get_section(
     return svc.get_section(name, version, section_id)
 
 
-@router.put("/kits/{name}/versions/{version}/sections/{section_id}")
+@router.put(
+    "/kits/{name}/versions/{version}/sections/{section_id}",
+    dependencies=[Depends(require_editor)],
+)
 def put_section(
     name: str,
     version: str,
@@ -228,6 +246,7 @@ def put_section(
 @router.delete(
     "/kits/{name}/versions/{version}/sections/{section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
 )
 def delete_section(
     name: str, version: str, section_id: str

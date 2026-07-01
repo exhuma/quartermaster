@@ -32,6 +32,10 @@ def dav(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "RESOURCE_BASE_URL": "https://x.example.com",
         "KITS_ROOT": str(kits),
         "APP_TOKENS_PATH": str(tokens),
+        "ROLE_STORE_PATH": str(tmp_path / "roles.toml"),
+        # alice is a bootstrap editor so her app token may write the shared
+        # catalog over DAV; consumers are denied write (test below).
+        "INITIAL_EDITORS": "alice",
         "DAV_REQUIRE_TLS": "false",
         "WEBUI_DIST": "/nonexistent",
     }.items():
@@ -80,6 +84,30 @@ def test_dav_put_lands_on_kits_root(dav) -> None:
     # The write landed on the same kits_root the MCP reads.
     on_disk = kits / "module-x" / "v1" / "instructions" / "new.md"
     assert on_disk.read_text() == "# new section\n"
+
+
+def test_dav_consumer_read_allowed_write_denied(dav) -> None:
+    """A consumer's app token may read over DAV but not mutate the catalog."""
+    client, _token, _kits = dav
+    tokens_path = get_settings().app_tokens_path
+    _, bob_token = app_tokens.mint(tokens_path, "bob", "consumer")
+
+    # Read is open to any authenticated caller.
+    read = client.get(
+        "/dav/module-x/v1/instructions/invariant.md",
+        auth=("bob", bob_token),
+    )
+    assert read.status_code == 200
+
+    # Write is editor-only — bob is a consumer, so the app-token DAV path
+    # (which bypasses the REST editor dependency) is gated here.
+    write = client.put(
+        "/dav/module-x/v1/instructions/sneaky.md",
+        content="# nope\n",
+        auth=("bob", bob_token),
+    )
+    assert write.status_code == 403
+    assert not (_kits / "module-x" / "v1" / "instructions" / "sneaky.md").exists()
 
 
 def test_dav_propfind_lists_collection(dav) -> None:

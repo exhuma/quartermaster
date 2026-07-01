@@ -244,7 +244,10 @@ def catalog_fingerprint() -> str:
         manifest["__name__"] = info.name
         manifest["__latest__"] = info.latest_version
         parts.append(json.dumps(manifest, sort_keys=True))
-        outline = read_kit_outline(info.name)
+        # Force the PUBLIC outline: this fingerprint keys the shared, on-disk
+        # embedding cache, so it must never reflect a caller's private kit
+        # (even one shadowing a public name) — pass subject=None explicitly.
+        outline = read_kit_outline(info.name, subject=None)
         parts.append(json.dumps(outline, sort_keys=True))
     blob = "\n".join(parts)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
