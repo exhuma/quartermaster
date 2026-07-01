@@ -7,6 +7,7 @@ const { kits, error, fetchKits, createKit, deleteKit } = useKits()
 
 const headers = [
   { title: 'Name', key: 'name' },
+  { title: 'Layer', key: 'source_layer' },
   { title: 'Summary', key: 'description' },
   { title: 'Latest', key: 'latest_version' },
   { title: 'Versions', key: 'versions' },
@@ -73,6 +74,12 @@ async function confirmDelete(): Promise<void> {
           >
             {{ item.name }}
           </router-link>
+        </template>
+        <template #item.source_layer="{ item }">
+          <v-chip v-if="item.source_layer" size="small" variant="tonal">
+            {{ item.source_layer }}
+          </v-chip>
+          <span v-else class="text-medium-emphasis">—</span>
         </template>
         <template #item.versions="{ item }">
           <v-chip

@@ -6,6 +6,7 @@ export interface KitInfo {
   description: string
   versions: string[]
   latest_version: string
+  source_layer: string | null
 }
 
 export interface KitDetail {
