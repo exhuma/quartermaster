@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
 
 from app import kits as kits_mod
+from app.authz import require_editor
 from app.media_types import VendorJSONResponse, require_vendor_accept
 from app.services import kit_service as svc
 from app.services.kit_service import _layer_path, _layer_write_path
@@ -130,7 +131,11 @@ def list_kits_in_layer(layer_id: str) -> list[dict[str, Any]]:
     return kits
 
 
-@router.post("/{layer_id}", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{layer_id}",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
+)
 def create_kit_in_layer(
     layer_id: str, payload: KitCreate, response: Response
 ) -> dict[str, Any]:
@@ -159,7 +164,9 @@ def get_kit_in_layer(layer_id: str, name: str) -> dict[str, Any]:
 
 
 @router.delete(
-    "/{layer_id}/{name}", status_code=status.HTTP_204_NO_CONTENT
+    "/{layer_id}/{name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
 )
 def delete_kit_from_layer(layer_id: str, name: str) -> Response:
     """Delete a kit from a specific layer (idempotent, 403 if readonly)."""
@@ -182,7 +189,10 @@ def get_applicability_in_layer(
     return svc.get_applicability(name, root=root)
 
 
-@router.put("/{layer_id}/{name}/applicability")
+@router.put(
+    "/{layer_id}/{name}/applicability",
+    dependencies=[Depends(require_editor)],
+)
 def replace_applicability_in_layer(
     layer_id: str, name: str, applicability: dict[str, Any]
 ) -> dict[str, Any]:
@@ -204,7 +214,9 @@ def list_versions_in_layer(layer_id: str, name: str) -> list[str]:
 
 
 @router.post(
-    "/{layer_id}/{name}/versions", status_code=status.HTTP_201_CREATED
+    "/{layer_id}/{name}/versions",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
 )
 def create_version_in_layer(
     layer_id: str,
@@ -230,6 +242,7 @@ def create_version_in_layer(
 @router.delete(
     "/{layer_id}/{name}/versions/{version}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
 )
 def delete_version_from_layer(
     layer_id: str, name: str, version: str
@@ -266,7 +279,8 @@ def get_section_in_layer(
 
 
 @router.put(
-    "/{layer_id}/{name}/versions/{version}/sections/{section_id}"
+    "/{layer_id}/{name}/versions/{version}/sections/{section_id}",
+    dependencies=[Depends(require_editor)],
 )
 def put_section_in_layer(
     layer_id: str,
@@ -292,6 +306,7 @@ def put_section_in_layer(
 @router.delete(
     "/{layer_id}/{name}/versions/{version}/sections/{section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
 )
 def delete_section_from_layer(
     layer_id: str, name: str, version: str, section_id: str

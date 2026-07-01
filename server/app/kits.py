@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from app.config import KitLayerConfig, get_settings
+from app.identity import current_sub
+from app.private_kits import owned_private_roots
 
 logger = logging.getLogger(__name__)
 
@@ -609,6 +611,54 @@ def _get_effective_layers(settings: Any) -> list[KitLayerConfig]:
     raise ValueError("Settings object has no kit root configured")
 
 
+# The synthetic layer name for a caller's private-kit overlay. One private
+# layer at most per caller, placed at highest priority so a private kit shadows
+# a public kit of the same name FOR THE OWNER ONLY.
+_PRIVATE_LAYER_NAME = "__private__"
+
+# Sentinel distinguishing "resolve the subject from the identity contextvar"
+# (the default for owner-aware reads) from an explicit ``None`` meaning
+# "public catalog only, ignore any caller in context" (used by the vocabulary
+# / embedding-cache path so private kits never poison the shared cache).
+_CTX_SUBJECT: Any = object()
+
+
+def _resolve_subject(subject: Any) -> str | None:
+    """Resolve a subject argument to a concrete subject or ``None``.
+
+    :param subject: ``_CTX_SUBJECT`` → read the identity contextvar; otherwise
+        a ``str`` subject or ``None`` (public) passed straight through.
+    """
+    if subject is _CTX_SUBJECT:
+        return current_sub()
+    return subject
+
+
+def _caller_layers(subject: Any = _CTX_SUBJECT) -> list[KitLayerConfig]:
+    """Return the effective layers for a caller, private overlay last.
+
+    The public layers are always present; when the caller (from *subject* or
+    the identity contextvar) has an existing private catalog, it is appended as
+    the highest-priority layer. A caller with no private kits — or no
+    identity — sees exactly the public catalog, so this is a no-op on the hot
+    public path and default-deny for private content.
+
+    :param subject: ``_CTX_SUBJECT`` (contextvar), a ``str`` subject, or
+        ``None`` to force public-only.
+    :returns: Ordered layers, base → overlay, private overlay last if any.
+    """
+    settings = get_settings()
+    layers = list(_get_effective_layers(settings))
+    sub = _resolve_subject(subject)
+    for root in owned_private_roots(sub):
+        layers.append(
+            KitLayerConfig(
+                name=_PRIVATE_LAYER_NAME, path=root, readonly=False
+            )
+        )
+    return layers
+
+
 def _kit_version_paths_layered(
     layers: list[KitLayerConfig],
 ) -> dict[str, dict[str, tuple[Path, Path, str]]]:
@@ -642,17 +692,20 @@ def _kit_version_paths_layered(
     return result
 
 
-def _resolve_kit_root(name: str) -> tuple[Path, str]:
+def _resolve_kit_root(
+    name: str, subject: Any = _CTX_SUBJECT
+) -> tuple[Path, str]:
     """
     Return the root and layer name for the highest-priority layer
     containing *name*.
 
     :param name: Kit name.
+    :param subject: Caller identity for private-kit visibility (see
+        :func:`_caller_layers`).
     :returns: Tuple of ``(root_path, layer_name)``.
     :raises KitNotFoundError: If no configured layer contains *name*.
     """
-    settings = get_settings()
-    layers = _get_effective_layers(settings)
+    layers = _caller_layers(subject)
     for layer in reversed(layers):
         if name in _kit_version_paths(layer.path):
             return layer.path, layer.name
@@ -660,8 +713,8 @@ def _resolve_kit_root(name: str) -> tuple[Path, str]:
 
 
 def _resolve_merged_kit(
-    name: str, version: str | None = None
-) -> tuple[str, Path, list[tuple["KitSection", Path]]]:
+    name: str, version: str | None = None, subject: Any = _CTX_SUBJECT
+) -> tuple[str, Path, list[tuple[KitSection, Path]]]:
     """
     Resolve a kit for a merged read, collecting binding section contributions.
 
@@ -678,8 +731,7 @@ def _resolve_merged_kit(
     :raises KitVersionNotFoundError: If the version does not exist in
         the primary layer.
     """
-    settings = get_settings()
-    layers = _get_effective_layers(settings)
+    layers = _caller_layers(subject)
     layered = _kit_version_paths_layered(layers)
 
     if name not in layered:
@@ -690,7 +742,9 @@ def _resolve_merged_kit(
     if resolved not in kit_versions:
         raise KitVersionNotFoundError(name, resolved)
 
-    primary_index_path, _primary_root, primary_layer_name = kit_versions[resolved]
+    primary_index_path, _primary_root, primary_layer_name = kit_versions[
+        resolved
+    ]
 
     # Collect binding sections from lower-priority layers
     binding_contributions: list[tuple[KitSection, Path]] = []
@@ -797,7 +851,7 @@ def _normalize_traits(
 
 
 def _catalog_entries(
-    *, strict: bool = False
+    *, strict: bool = False, subject: Any = _CTX_SUBJECT
 ) -> tuple[list[tuple[KitInfo, KitApplicability]], list[dict[str, str]]]:
     """
     Return all kits with validated applicability metadata.
@@ -817,16 +871,15 @@ def _catalog_entries(
     """
     entries: list[tuple[KitInfo, KitApplicability]] = []
     warnings: list[dict[str, str]] = []
-    settings = get_settings()
-    layers = _get_effective_layers(settings)
+    layers = _caller_layers(subject)
     layer_by_name = {layer.name: layer for layer in layers}
-    for info in list_all_kits():
+    for info in list_all_kits(subject=subject):
         # Resolve the kit's owning layer root from the source_layer tag
         layer = layer_by_name.get(info.source_layer or "")
         if layer is None:
             # Fallback for legacy single-root mocks without source_layer
             try:
-                root, _ = _resolve_kit_root(info.name)
+                root, _ = _resolve_kit_root(info.name, subject=subject)
             except KitNotFoundError:
                 warnings.append({
                     "kit": info.name,
@@ -955,22 +1008,28 @@ def iter_catalog() -> list[tuple[KitInfo, KitApplicability]]:
     :returns: List of ``(KitInfo, KitApplicability)`` tuples sorted by
         kit name.
     """
-    entries, _warnings = _catalog_entries()
+    # Public catalog only: this feeds the trait vocabulary and the shared,
+    # on-disk embedding cache, which must never contain per-caller private
+    # kits (see app.traits / app.embeddings).
+    entries, _warnings = _catalog_entries(subject=None)
     return entries
 
 
-def list_all_kits() -> list[KitInfo]:
+def list_all_kits(subject: Any = _CTX_SUBJECT) -> list[KitInfo]:
     """
     Return metadata for all available instruction kits (merged view).
 
     In a multi-root setup, kit names present in multiple layers are
-    represented once, from the highest-priority (overlay) layer.
+    represented once, from the highest-priority (overlay) layer. The caller's
+    own private kits (if any) are merged in as the highest-priority overlay;
+    no other caller's private kits are ever visible.
 
+    :param subject: Caller identity for private-kit visibility (see
+        :func:`_caller_layers`).
     :returns: List of :class:`KitInfo` instances sorted alphabetically
         by kit name, each including available versions and the latest.
     """
-    settings = get_settings()
-    layers = _get_effective_layers(settings)
+    layers = _caller_layers(subject)
     logger.debug(
         "list_all_kits: scanning %d layer(s): %s",
         len(layers),
@@ -991,6 +1050,25 @@ def list_all_kits() -> list[KitInfo]:
             )
         )
     return kits
+
+
+def list_private_kits(subject: str) -> list[KitInfo]:
+    """
+    Return only the private kits owned by *subject* (never public kits).
+
+    Powers the owner's private-kit management view. Returns an empty list for
+    an owner with no private catalog.
+
+    :param subject: The owner's stable subject.
+    :returns: The owner's private :class:`KitInfo` entries, sorted by name.
+    """
+    if not subject:
+        return []
+    return [
+        kit
+        for kit in list_all_kits(subject=subject)
+        if kit.source_layer == _PRIVATE_LAYER_NAME
+    ]
 
 
 def list_catalog_v2() -> list[dict[str, Any]]:
@@ -1237,7 +1315,10 @@ def explain_kit_v2(
 
 
 def _resolve_kit_version(
-    name: str, version: str | None = None, root: Path | None = None
+    name: str,
+    version: str | None = None,
+    root: Path | None = None,
+    subject: Any = _CTX_SUBJECT,
 ) -> tuple[str, Path]:
     """
     Resolve a kit name and optional version to its index path.
@@ -1260,8 +1341,7 @@ def _resolve_kit_version(
             raise KitNotFoundError(name)
         versions = all_versions[name]
     else:
-        settings = get_settings()
-        layers = _get_effective_layers(settings)
+        layers = _caller_layers(subject)
         layered = _kit_version_paths_layered(layers)
         if name not in layered:
             logger.debug("resolve: kit %r not found", name)
@@ -1276,7 +1356,10 @@ def _resolve_kit_version(
 
 
 def read_kit_outline(
-    name: str, version: str | None = None, root: Path | None = None
+    name: str,
+    version: str | None = None,
+    root: Path | None = None,
+    subject: Any = _CTX_SUBJECT,
 ) -> dict[str, Any]:
     """
     Return a cheap section map for a kit without loading section bodies.
@@ -1320,7 +1403,9 @@ def read_kit_outline(
         }
 
     # Merged mode: include binding contributions from lower-priority layers
-    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(name, version)
+    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(
+        name, version, subject=subject
+    )
     primary_index = _load_kit_index(primary_index_path, name)
     primary_instr_dir = primary_index_path.parent
 
@@ -1354,6 +1439,7 @@ def read_kit(
     version: str | None = None,
     sections: list[str] | None = None,
     root: Path | None = None,
+    subject: Any = _CTX_SUBJECT,
 ) -> str:
     """
     Return the content of a named instruction kit.
@@ -1404,7 +1490,9 @@ def read_kit(
         return "\n\n".join(bodies) + "\n"
 
     # Merged read: include binding contributions from lower-priority layers
-    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(name, version)
+    resolved, primary_index_path, binding_contribs = _resolve_merged_kit(
+        name, version, subject=subject
+    )
     primary_index = _load_kit_index(primary_index_path, name)
     primary_instr_dir = primary_index_path.parent
 
@@ -1471,8 +1559,7 @@ def compare_kit_versions(
     logger.debug(
         "compare_kit_versions: name=%r %r..%r", name, from_version, to_version
     )
-    settings = get_settings()
-    layers = _get_effective_layers(settings)
+    layers = _caller_layers()
     kit_dir: Path | None = None
     for layer in reversed(layers):
         candidate = layer.path / name

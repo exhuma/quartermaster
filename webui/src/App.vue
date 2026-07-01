@@ -1,15 +1,28 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 
 import { useAuth } from '@/composables/useAuth'
 import { useLoading } from '@/composables/useLoading'
+import { useMe } from '@/composables/useMe'
 import { authError, retryAuthentication } from '@/auth/reauthGuard'
 import BuildMeta from '@/components/BuildMeta.vue'
 
 const { isAuthenticated, displayName, refresh, login, logout } = useAuth()
 const { isLoading } = useLoading()
+const { isEditor, fetchMe } = useMe()
 
 onMounted(refresh)
+
+// Load the caller's role once authenticated so nav gating reflects it.
+watch(
+  isAuthenticated,
+  (authed) => {
+    if (authed) {
+      fetchMe()
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -21,9 +34,13 @@ onMounted(refresh)
            stays centered independent of the title/auth widths on either side. -->
       <nav class="app-nav">
         <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
+        <v-btn variant="text" :to="{ name: 'private-kits' }">Private</v-btn>
         <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
         <v-btn variant="text" :to="{ name: 'mount' }">Mount</v-btn>
         <v-btn variant="text" :to="{ name: 'metrics' }">Metrics</v-btn>
+        <v-btn v-if="isEditor" variant="text" :to="{ name: 'admin-users' }">
+          Users
+        </v-btn>
       </nav>
 
       <v-spacer />

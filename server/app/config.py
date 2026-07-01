@@ -4,18 +4,21 @@ Application settings loaded from environment variables via pydantic-settings.
 
 from __future__ import annotations
 
+import json
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlparse
 
 from pydantic import (
     BaseModel,
     PrivateAttr,
     computed_field,
+    field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class KitLayerConfig(BaseModel):
@@ -129,6 +132,8 @@ _APP_TOKENS_DEFAULT = _SERVER_ROOT / "var" / "app_tokens.json"
 _WEBUI_DIST_DEFAULT = _SERVER_ROOT / "webui_dist"
 _EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
 _METRICS_LOCAL_DB_DEFAULT = _SERVER_ROOT / "var" / "metrics.db"
+_ROLE_STORE_DEFAULT = _SERVER_ROOT / "var" / "roles.toml"
+_PRIVATE_KITS_DEFAULT = _SERVER_ROOT / "var" / "private-kits"
 
 
 class Settings(BaseSettings):
@@ -310,6 +315,17 @@ class Settings(BaseSettings):
     webui_keycloak_client_id: str = "quartermaster-webui"
     client_registry_path: Path = _CLIENT_REGISTRY_DEFAULT
     app_tokens_path: Path = _APP_TOKENS_DEFAULT
+    # Authorization (module-authz). Roles map an IdP subject (Keycloak ``sub``)
+    # to ``editor``/``consumer``; the store defaults to consumer for unknown
+    # users. ``initial_editors`` seeds bootstrap editors that can never be
+    # locked out (they always resolve to editor and cannot be revoked via the
+    # store). Accepts a JSON array or a comma-separated list of subjects.
+    role_store_path: Path = _ROLE_STORE_DEFAULT
+    initial_editors: Annotated[list[str], NoDecode] = []
+    # Owner-only private kits live under a per-owner subtree of this root
+    # (never the public catalog), so a missed enumeration path cannot leak
+    # them. In production, point this at a writable data volume.
+    private_kits_root: Path = _PRIVATE_KITS_DEFAULT
     dav_require_tls: bool = True
     webui_dist: Path = _WEBUI_DIST_DEFAULT
     # Dev-only auth bypass (module-dev-auth-bypass). Both default off; never
@@ -364,8 +380,30 @@ class Settings(BaseSettings):
     # file is read a single time and ``effective_layers`` stays cheap.
     _file_layers: list[KitLayerConfig] | None = PrivateAttr(default=None)
 
+    @field_validator("initial_editors", mode="before")
+    @classmethod
+    def _split_initial_editors(cls, value: object) -> object:
+        """Accept a comma-separated ``QM_INITIAL_EDITORS`` in addition to JSON.
+
+        Keycloak subjects are comma-free, so a plain ``sub-a,sub-b`` string is
+        the friendliest ops input; a JSON array still works too.
+        """
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                # JSON array. NoDecode skips pydantic's own JSON pass, so parse
+                # it here; fall back to comma-splitting on malformed JSON.
+                try:
+                    return json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass
+            return [s.strip() for s in stripped.split(",") if s.strip()]
+        return value
+
     @model_validator(mode="after")
-    def _validate_kit_config(self) -> "Settings":
+    def _validate_kit_config(self) -> Settings:
         """Ensure at least one kit root is configured with at least one writable layer."""
         if self.kit_layers_file is not None:
             self._file_layers = load_layers_from_toml(self.kit_layers_file)

@@ -31,8 +31,8 @@ Start the server from the ``server/`` directory:
 from __future__ import annotations
 
 import asyncio
-import logging
 import contextlib
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 from app import health as health_probes
 from app import telemetry
 from app.auth import JWTAuthMiddleware
+from app.authz import EditorRequiredError, PrivateKitAccessError
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
 from app.kits import (
@@ -75,13 +76,14 @@ from app.kits import (
 from app.kits import (
     compare_kit_versions as _compare_kit_versions,
 )
+from app.mcp_identity import MCPIdentityASGI
 from app.mcp_logging import ToolCallAuditMiddleware
-from app.observability import local_store
 from app.middleware import (
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
     VersionHeaderMiddleware,
 )
+from app.observability import local_store
 from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.requests import (
@@ -96,16 +98,27 @@ from app.routers import (
     integration,
     kits_admin,
     kits_layers,
+)
+from app.routers import (
+    me as me_router,
+)
+from app.routers import (
     metrics as metrics_router,
+)
+from app.routers import (
+    private_kits as private_kits_router,
+)
+from app.routers import (
+    roles as roles_router,
 )
 from app.sampling import (
     SamplingTraitEngine,
     client_supports_elicitation,
     client_supports_sampling,
 )
-from app.traits import load_vocabulary
 from app.storage.kit_writes import KitPathError
 from app.tokens import count_tokens
+from app.traits import load_vocabulary
 from app.user_agent import UserAgentMiddleware
 from app.version import app_version
 from app.webui import mount_webui
@@ -1026,6 +1039,8 @@ async def oauth_authorization_server_metadata() -> JSONResponse:
 # (HTTPException would couple the service layer to FastAPI; instead the
 # thin routers let domain exceptions propagate and we translate here.)
 _EXCEPTION_STATUS: dict[type[Exception], int] = {
+    EditorRequiredError: 403,
+    PrivateKitAccessError: 404,
     KitNotFoundError: 404,
     KitVersionNotFoundError: 404,
     KitSectionNotFoundError: 404,
@@ -1145,6 +1160,9 @@ def create_app() -> FastAPI:
     application.include_router(clients.router)
     application.include_router(app_tokens.router)
     application.include_router(metrics_router.router)
+    application.include_router(me_router.router)
+    application.include_router(roles_router.router)
+    application.include_router(private_kits_router.router)
 
     # Dev-only auth bypass: the token-minting router is imported and mounted
     # ONLY when explicitly enabled, so /auth/dev/* is a plain 404 in
@@ -1165,7 +1183,11 @@ def create_app() -> FastAPI:
 
     _register_exception_handlers(application)
 
-    application.mount("/kits", mcp_app)
+    # Wrap the MCP mount so the authenticated caller's identity (stashed on
+    # scope["state"] by JWTAuthMiddleware) is bound to context variables in the
+    # same task the tool runs in — the only reliable way to make identity
+    # visible inside @mcp.tool functions (see app.mcp_identity).
+    application.mount("/kits", MCPIdentityASGI(mcp_app))
 
     # WebDAV authoring endpoint over the kit catalog (Basic + app token,
     # enforced by JWTAuthMiddleware). Writes land on kits_root and are

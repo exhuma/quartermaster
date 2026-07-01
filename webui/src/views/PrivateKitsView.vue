@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-import { useKits } from '@/composables/useKits'
-import { useMe } from '@/composables/useMe'
+import { usePrivateKits } from '@/composables/usePrivateKits'
 
-const { kits, error, fetchKits, createKit, deleteKit } = useKits()
-const { isEditor, fetchMe } = useMe()
+const { kits, error, fetchPrivateKits, createPrivateKit, deletePrivateKit } =
+  usePrivateKits()
 
 const headers = [
   { title: 'Name', key: 'name' },
-  { title: 'Layer', key: 'source_layer' },
   { title: 'Summary', key: 'description' },
   { title: 'Latest', key: 'latest_version' },
   { title: 'Versions', key: 'versions' },
@@ -20,22 +18,18 @@ const createOpen = ref(false)
 const newName = ref('')
 const newSummary = ref('')
 const createError = ref<string | null>(null)
-
 const deleteTarget = ref<string | null>(null)
 
 const nameRule = (v: string) =>
   /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v) ||
-  'Lowercase words joined by hyphens, e.g. module-auth-oidc'
+  'Lowercase words joined by hyphens, e.g. my-private-notes'
 
-onMounted(() => {
-  fetchKits()
-  fetchMe()
-})
+onMounted(fetchPrivateKits)
 
 async function submitCreate(): Promise<void> {
   createError.value = null
   try {
-    await createKit(newName.value, newSummary.value)
+    await createPrivateKit(newName.value, newSummary.value)
     createOpen.value = false
     newName.value = ''
     newSummary.value = ''
@@ -46,7 +40,7 @@ async function submitCreate(): Promise<void> {
 
 async function confirmDelete(): Promise<void> {
   if (deleteTarget.value) {
-    await deleteKit(deleteTarget.value)
+    await deletePrivateKit(deleteTarget.value)
   }
   deleteTarget.value = null
 }
@@ -54,21 +48,21 @@ async function confirmDelete(): Promise<void> {
 
 <template>
   <v-container>
-    <div class="d-flex align-center mb-4">
-      <h1 class="text-h5 font-weight-medium">Instruction kits</h1>
-      <v-spacer />
-      <v-btn
-        v-if="isEditor"
-        color="primary"
-        prepend-icon="mdi-plus"
-        @click="createOpen = true"
-      >
-        New kit
-      </v-btn>
-      <v-chip v-else size="small" variant="tonal" color="info">
-        Read-only — editor role required to modify kits
+    <div class="d-flex align-center mb-2">
+      <h1 class="text-h5 font-weight-medium">Private kits</h1>
+      <v-chip size="small" variant="tonal" color="purple" class="ml-3">
+        <v-icon start size="small">mdi-lock</v-icon>
+        Visible only to you
       </v-chip>
+      <v-spacer />
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="createOpen = true">
+        New private kit
+      </v-btn>
     </div>
+    <p class="text-body-2 text-medium-emphasis mb-4">
+      Private kits are yours alone — no other user can see them, and they are
+      resolved for you over the MCP alongside the shared catalog.
+    </p>
 
     <v-alert
       v-if="error"
@@ -80,20 +74,6 @@ async function confirmDelete(): Promise<void> {
 
     <v-card>
       <v-data-table :headers="headers" :items="kits" item-value="name">
-        <template #item.name="{ item }">
-          <router-link
-            class="text-primary font-weight-medium"
-            :to="{ name: 'kit-detail', params: { name: item.name } }"
-          >
-            {{ item.name }}
-          </router-link>
-        </template>
-        <template #item.source_layer="{ item }">
-          <v-chip v-if="item.source_layer" size="small" variant="tonal">
-            {{ item.source_layer }}
-          </v-chip>
-          <span v-else class="text-medium-emphasis">—</span>
-        </template>
         <template #item.versions="{ item }">
           <v-chip
             v-for="v in item.versions"
@@ -107,7 +87,6 @@ async function confirmDelete(): Promise<void> {
         </template>
         <template #item.actions="{ item }">
           <v-btn
-            v-if="isEditor"
             icon="mdi-delete-outline"
             size="small"
             variant="text"
@@ -115,11 +94,16 @@ async function confirmDelete(): Promise<void> {
             @click="deleteTarget = item.name"
           />
         </template>
+        <template #no-data>
+          <div class="pa-4 text-medium-emphasis">
+            You have no private kits yet.
+          </div>
+        </template>
       </v-data-table>
     </v-card>
 
     <v-dialog v-model="createOpen" max-width="520">
-      <v-card title="New kit">
+      <v-card title="New private kit">
         <v-card-text>
           <v-alert
             v-if="createError"
@@ -132,12 +116,12 @@ async function confirmDelete(): Promise<void> {
             v-model="newName"
             label="Kit name"
             :rules="[nameRule]"
-            placeholder="module-example"
+            placeholder="my-private-notes"
           />
           <v-text-field v-model="newSummary" label="Summary" />
           <p class="text-caption text-medium-emphasis">
-            Creates a kit with one always-load invariant section. Edit its
-            sections and applicability afterwards.
+            Creates a private kit with one always-load invariant section, owned
+            by you.
           </p>
         </v-card-text>
         <v-card-actions>
@@ -149,7 +133,7 @@ async function confirmDelete(): Promise<void> {
     </v-dialog>
 
     <v-dialog :model-value="!!deleteTarget" max-width="420">
-      <v-card title="Delete kit">
+      <v-card title="Delete private kit">
         <v-card-text>
           Delete <strong>{{ deleteTarget }}</strong> and all its versions? This
           cannot be undone.

@@ -65,6 +65,18 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/private-kits',
+      name: 'private-kits',
+      component: () => import('@/views/PrivateKitsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('@/views/AdminUsersView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/auth/callback',
       name: 'auth-callback',
       component: () => import('@/views/AuthCallbackView.vue'),

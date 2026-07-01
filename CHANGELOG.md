@@ -8,6 +8,25 @@ project aims to follow semantic versioning.
 
 ### Added
 
+- Authorization with two roles — `editor` (admin: edits the shared catalog and
+  grants/revokes editor from others) and `consumer` (read-only, the default).
+  An IdP subject (`sub`) → role mapping is persisted as TOML
+  (`QM_ROLE_STORE_PATH`, default `server/var/roles.toml`); unknown users
+  default to `consumer`. Bootstrap editors are seeded via `QM_INITIAL_EDITORS`
+  (comma-separated or JSON array of `sub`s) and can never be locked out. New
+  endpoints: `GET /api/me`, editor-only `GET/PUT/DELETE /api/roles`. Web UI
+  gains a **Users** admin screen and hides edit controls for consumers. See
+  `MIGRATING-AUTHORIZATION.md`.
+- Private kits: any authenticated user (consumers included — ownership, not
+  role, is the gate) can author standalone kits under `QM_PRIVATE_KITS_ROOT`
+  (default `server/var/private-kits/`), visible **only to the owner** across
+  `list_kits`/`select_kits`/`resolve_kits`/`get_kit` over the MCP and never to
+  anyone else (non-owner reads return 404). Managed via `/api/private-kits` and
+  a **Private** web-UI screen. The shared trait vocabulary and embedding cache
+  stay public-only, so private kits never poison them.
+- Caller identity is now carried into FastMCP tool calls (via a context
+  variable bound by a plain-ASGI wrapper at the `/kits` mount), which is what
+  makes owner-only private-kit visibility work over the MCP.
 - Metrics dashboard time-series granularity toggle: a Hourly/Daily switch next
   to the window selector re-buckets the "Tokens sent to clients" and "Catalog
   growth" charts. The 24h window defaults to hourly (`1h`) buckets, the 7d/30d
@@ -43,6 +62,15 @@ project aims to follow semantic versioning.
 
 ### Security
 
+- Kit mutations now require the `editor` role. Every kit-writing REST route and
+  every WebDAV write method (`PUT`/`DELETE`/`MKCOL`/`MOVE`/`COPY`/`PROPPATCH`/
+  `LOCK`) is gated → **HTTP 403** for consumers (default-deny). This closes the
+  path where any authenticated user, or any minted app token, could modify the
+  shared catalog. **Breaking for existing deployments** — set
+  `QM_INITIAL_EDITORS` to keep editing; see `MIGRATING-AUTHORIZATION.md`.
+- Ownership and roles now key on the stable Keycloak `sub` (immutable) rather
+  than `preferred_username`. App tokens minted before this release should be
+  revoked and re-minted (they only grant WebDAV/metrics access).
 - The bearer-token 401 response no longer echoes the raw PyJWT exception text
   to the client (it is logged instead) — module-auth-oidc-python.
 
