@@ -128,6 +128,7 @@ _APP_TOKENS_DEFAULT = _SERVER_ROOT / "var" / "app_tokens.json"
 # API and MCP still work); the Docker image points this at the built dist.
 _WEBUI_DIST_DEFAULT = _SERVER_ROOT / "webui_dist"
 _EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
+_METRICS_LOCAL_DB_DEFAULT = _SERVER_ROOT / "var" / "metrics.db"
 
 
 class Settings(BaseSettings):
@@ -273,6 +274,17 @@ class Settings(BaseSettings):
     :param metrics_section_level: When true, emit per-section delivery metrics
         (``qm.section.deliveries``). Off by default to bound metric
         cardinality on large catalogs.
+    :param metrics_local_enabled: When true (default), record usage events into
+        a local SQLite store that feeds the in-app Metrics dashboard. This is
+        independent of OpenTelemetry, so the dashboard works even when OTLP is
+        broken or unconfigured. Set false to disable local recording entirely.
+    :param metrics_local_db_path: Path to the local metrics SQLite database.
+        Defaults to a dev-only path under ``server/var/``; set to a writable
+        data-volume path in production (e.g. ``/data/metrics.db``) so the
+        rolling window survives container restarts.
+    :param metrics_local_retention_days: How many days of usage events the local
+        store keeps before pruning (default 7). Long-term history is delegated
+        to OpenTelemetry; this store is a short, capped complement.
     """
 
     # All environment variables are prefixed with the application name
@@ -342,6 +354,11 @@ class Settings(BaseSettings):
     metrics_prometheus_enabled: bool = False
     metrics_allow_anonymous: bool = False
     metrics_section_level: bool = False
+    # Always-on local metrics store (independent of OTEL) feeding the in-app
+    # Metrics dashboard. Short rolling window; long-term history is OTEL's job.
+    metrics_local_enabled: bool = True
+    metrics_local_db_path: Path = _METRICS_LOCAL_DB_DEFAULT
+    metrics_local_retention_days: int = 7
 
     # Layers parsed from ``kit_layers_file`` once, at validation time, so the
     # file is read a single time and ``effective_layers`` stays cheap.

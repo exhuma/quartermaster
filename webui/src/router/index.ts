@@ -45,6 +45,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/metrics',
+      name: 'metrics',
+      component: () => import('@/views/MetricsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/kit/:name',
       name: 'kit-detail',
       component: () => import('@/views/KitDetailView.vue'),

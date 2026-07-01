@@ -24,6 +24,7 @@ from typing import Any, Protocol
 
 from app import telemetry
 from app.kits import read_kit, select_kits_v2
+from app.observability import local_store
 from app.tokens import count_tokens, estimate_tokens_from_bytes
 from app.traits import (
     SectionRef,
@@ -344,6 +345,9 @@ def resolve_kits(
     kits_out: list[dict[str, Any]] = []
     total_delivered = 0
     total_offered = 0
+    # Per-kit deliveries for the OTEL-independent local store, recorded once
+    # after the loop so the "delivered together" set is kept for co-occurrence.
+    local_deliveries: list[tuple[str, str, int]] = []
     with telemetry.span("resolve.assemble") as assemble_span:
         for candidate in selection["candidates"]:
             name = candidate["name"]
@@ -388,6 +392,7 @@ def resolve_kits(
                 tokens=delivered_tokens,
                 section_ids=always_ids,
             )
+            local_deliveries.append((name, "inlined", delivered_tokens))
             if offered_ids:
                 telemetry.record_kit_delivery(
                     kit=name,
@@ -395,6 +400,7 @@ def resolve_kits(
                     tokens=offered_tokens,
                     section_ids=offered_ids,
                 )
+                local_deliveries.append((name, "offered", offered_tokens))
 
             kits_out.append(
                 {
@@ -432,6 +438,18 @@ def resolve_kits(
             "contexts": inferred.contexts,
         },
     )
+    # Mirror into the OTEL-independent local store so the in-app Metrics
+    # dashboard has data even when OTLP export is broken/unconfigured.
+    local_store.record_resolve(
+        engine=inferred.engine,
+        confidence=selection["confidence"],
+        coverage=selection["coverage"],
+        broadening=selection["broadening_recommended"],
+        deliveries=local_deliveries,
+        delivered_tokens=total_delivered,
+        offered_tokens=total_offered,
+    )
+    local_store.maybe_snapshot_catalog()
 
     return {
         "engine": inferred.engine,

@@ -30,6 +30,7 @@ from typing import Any
 from fastmcp.server.middleware.middleware import Middleware, MiddlewareContext
 
 from app import telemetry
+from app.observability import local_store
 
 logger = logging.getLogger("app.mcp_audit")
 
@@ -119,6 +120,12 @@ class ToolCallAuditMiddleware(Middleware):
                     telemetry.record_tool_call(tool_name, ok, duration_ms)
                 except Exception:  # pragma: no cover - telemetry never breaks
                     pass
+                # OTEL-independent local mirror for the in-app dashboard.
+                local_store.record_tool_call(
+                    tool=tool_name or "unknown",
+                    ok=ok,
+                    duration_ms=duration_ms,
+                )
                 try:
                     logger.info(
                         "mcp_audit event=tool_call session=%s seq=%d "

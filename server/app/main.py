@@ -32,8 +32,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import contextlib
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.logging_config import configure_logging
@@ -75,6 +76,7 @@ from app.kits import (
     compare_kit_versions as _compare_kit_versions,
 )
 from app.mcp_logging import ToolCallAuditMiddleware
+from app.observability import local_store
 from app.middleware import (
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
@@ -88,7 +90,14 @@ from app.requests import (
 from app.requests import request_kit_extension as _request_kit_extension
 from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
-from app.routers import app_tokens, clients, integration, kits_admin, kits_layers
+from app.routers import (
+    app_tokens,
+    clients,
+    integration,
+    kits_admin,
+    kits_layers,
+    metrics as metrics_router,
+)
 from app.sampling import (
     SamplingTraitEngine,
     client_supports_elicitation,
@@ -795,11 +804,16 @@ def get_kit(
         raise ValueError(str(exc)) from exc
     except KitSectionNotFoundError as exc:
         raise ValueError(str(exc)) from exc
+    disposition = "sections" if sections else "full"
+    tokens = count_tokens(markdown)
     telemetry.record_kit_delivery(
         kit=name,
-        disposition="sections" if sections else "full",
-        tokens=count_tokens(markdown),
+        disposition=disposition,
+        tokens=tokens,
         section_ids=sections or [],
+    )
+    local_store.record_delivery(
+        kit=name, disposition=disposition, tokens=tokens
     )
     return markdown
 
@@ -1070,6 +1084,22 @@ def create_app() -> FastAPI:
         pass
 
     mcp_app = mcp.http_app(path="/mcp")
+
+    @contextlib.asynccontextmanager
+    async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Init the always-on local metrics store, then run FastMCP's lifespan.
+
+        Composed (not replacing) so the OTEL-independent dashboard store is
+        opened once at startup; a failure here never blocks the app (init is
+        itself best-effort).
+        """
+        try:
+            local_store.init(get_settings())
+        except Exception:  # noqa: BLE001 - metrics must not block startup
+            logger.warning("local metrics store init skipped", exc_info=True)
+        async with mcp_app.lifespan(app):
+            yield
+
     # Swagger docs are enabled so the vendor media-type contract is
     # discoverable. They sit behind the auth + User-Agent middleware like
     # the rest of the app (not in the public-path allowlist).
@@ -1078,7 +1108,7 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url=None,
         openapi_url="/openapi.json",
-        lifespan=mcp_app.lifespan,
+        lifespan=_lifespan,
     )
 
     # Health probes (module-observability-healthz). /health is kept as a
@@ -1114,6 +1144,7 @@ def create_app() -> FastAPI:
     application.include_router(integration.router)
     application.include_router(clients.router)
     application.include_router(app_tokens.router)
+    application.include_router(metrics_router.router)
 
     # Dev-only auth bypass: the token-minting router is imported and mounted
     # ONLY when explicitly enabled, so /auth/dev/* is a plain 404 in

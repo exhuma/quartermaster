@@ -131,6 +131,9 @@ RUN mkdir -p /data/kits && chown -R appuser:appuser /data
 ENV QM_KITS_ROOT=/data/kits
 ENV QM_CLIENT_REGISTRY_PATH=/data/client_registry.json
 ENV QM_APP_TOKENS_PATH=/data/app_tokens.json
+# Local metrics store (in-app dashboard, independent of OTEL) on the /data
+# volume so its rolling window survives container restarts.
+ENV QM_METRICS_LOCAL_DB_PATH=/data/metrics.db
 ENV QM_WEBUI_DIST=/app/server/webui_dist
 # Embedding model + trait-embedding caches live under /app (baked into the
 # image above), NOT on the /data volume — a runtime bind mount over /data would
