@@ -43,7 +43,7 @@ class InferredTrait:
 
     category: str
     value: str
-    provenance: str  # "llm" | "embedding" | "lexical"
+    provenance: str  # "sampling" | "llm" | "embedding" | "lexical"
 
 
 @dataclass(frozen=True)
