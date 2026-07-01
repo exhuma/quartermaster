@@ -141,6 +141,34 @@ def test_resolve_emits_core_metrics(harness: Any) -> None:
     assert delivered.sum > 0
 
 
+def test_resolve_records_sampling_as_its_own_engine(harness: Any) -> None:
+    """MCP-sampling resolves surface ``sampling`` in ``qm.resolve.engine``.
+
+    Sampling is inferred in the tool wrapper (:mod:`app.main`) and handed to
+    the resolver as ``pre_inferred``; this guards that its ``engine`` label
+    reaches the metric as a distinct value rather than being lost or lumped in
+    with the fallback chain.
+    """
+    from app.resolver import InferredTrait, InferredTraits
+
+    reader, _exporter = harness
+    pre_inferred = InferredTraits(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=[],
+        contexts=["backend"],
+        provenance=[InferredTrait("languages", "python", "sampling")],
+        engine="sampling",
+    )
+    resolver.resolve_kits(
+        task="add a FastAPI REST endpoint", pre_inferred=pre_inferred
+    )
+    points = _points(reader)
+
+    engines = {p.attributes.get("engine") for p in points["qm.resolve.engine"]}
+    assert "sampling" in engines
+
+
 def test_resolve_emits_kit_and_section_deliveries(harness: Any) -> None:
     reader, _exporter = harness
     resolver.resolve_kits(task="add a FastAPI REST endpoint")
