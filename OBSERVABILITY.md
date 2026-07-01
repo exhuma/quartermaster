@@ -17,6 +17,52 @@ costs effectively nothing and exports nothing.
 
 ---
 
+## 0. In-app metrics dashboard (local, always-on)
+
+The OpenTelemetry path above only exports when an OTLP endpoint or Prometheus
+scrape is configured, and its recording helpers go inert when OTEL is not
+initialised. During active development you often want to *see* usage anyway —
+even when OTEL is broken or unconfigured. For that, Quartermaster keeps a
+small, **always-on local store** that feeds a **Metrics** page in the web UI.
+
+- **Independent of OTEL.** Usage is recorded into a local SQLite database at the
+  same call sites as the OTEL helpers, but *not* gated on OTEL being
+  initialised. The dashboard reads that store, never the OTLP exporters — so it
+  works regardless of OTEL health (it shows the current OTLP state as a badge:
+  `exporting` / `configured` / `failing` / `not configured`).
+- **Short rolling window.** Only the last `QM_METRICS_LOCAL_RETENTION_DAYS`
+  (default **7**) of events are kept; older rows are pruned to bound storage.
+  **Long-term history is delegated to OTEL → Grafana** (sections below); this
+  store is a capped complement, not a replacement.
+- **Survives restarts.** The database lives on the data volume
+  (`QM_METRICS_LOCAL_DB_PATH`, default `/data/metrics.db` in the image), so the
+  window persists across container restarts.
+- **Same privacy rules.** Only kit names, dispositions, trait/engine/confidence
+  labels, token counts and durations are stored — never task text.
+
+The dashboard answers, with a plain-language "what it shows / how to read it"
+caption on every chart:
+
+| Question | Chart |
+|---|---|
+| Which kits are used a lot / almost none? | **Kit usage** bar (delivered-disposition counts, busiest first). |
+| How many tokens are sent back to clients? | **Tokens sent** time-series (delivered vs offered). |
+| How distinct are kits (overlap vs synergy)? | Two heatmaps — **structural** (declared-trait Jaccard, works day one) and **behavioural** (co-occurrence per resolve). Bright in *both* → redundant; bright behavioural only → complementary. |
+| Is the selector healthy? | **Selection health** — engine/confidence mix, coverage, broadening rate. |
+| Is the server slow / erroring? | **Tool latency** p50/p95 per tool. |
+| Can the catalog grow without bloating context? | **Catalog growth vs delivery** per domain. |
+
+| Variable | Default | Effect |
+|---|---|---|
+| `QM_METRICS_LOCAL_ENABLED` | `true` | Record usage into the local store. Set false to disable it entirely. |
+| `QM_METRICS_LOCAL_DB_PATH` | `server/var/metrics.db` (dev) · `/data/metrics.db` (image) | SQLite file for the rolling window. Put it on the data volume in production. |
+| `QM_METRICS_LOCAL_RETENTION_DAYS` | `7` | Days of events kept before pruning. |
+
+The bundle is served read-only at `GET /api/metrics/overview?window=24h|7d|30d`
+(authenticated like the rest of `/api`; the window is capped to the retention).
+
+---
+
 ## 1. Setup
 
 Install the optional extra (bundled in the Docker image) and OpenTelemetry +

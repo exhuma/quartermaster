@@ -16,8 +16,10 @@
     "check:no-dev-auth": "if grep -rqE 'auth/dev|VITE_DEV_AUTH' dist; then echo 'FAIL: dev-auth code leaked into the production build' && exit 1; else echo 'ok: no dev-auth code in dist'; fi"
   },
   "dependencies": {
+    "echarts": "^5.6.0",
     "oidc-client-ts": "^3.1.0",
     "vue": "^3.5.0",
+    "vue-echarts": "^7.0.3",
     "vue-router": "^4.4.0",
     "vuetify": "^4.1.0"
   },

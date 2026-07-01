@@ -19,6 +19,7 @@ onMounted(refresh)
       <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
       <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
       <v-btn variant="text" :to="{ name: 'mount' }">Mount</v-btn>
+      <v-btn variant="text" :to="{ name: 'metrics' }">Metrics</v-btn>
       <v-spacer />
       <template v-if="isAuthenticated">
         <span class="mr-2 text-body-2">{{ displayName }}</span>
