@@ -15,7 +15,7 @@ import type {
 type Colors = Record<string, string>
 
 // A stable qualitative palette drawn from theme tokens, for pies and the
-// per-domain catalog series.
+// catalog vs delivery lines.
 export function palette(c: Colors): string[] {
   return [c.primary, c.info, c.success, c.warning, c.secondary, c.error]
 }
@@ -174,58 +174,65 @@ export function toolLatencyOption(
   }
 }
 
-export function catalogGrowthOption(
-  g: CatalogGrowth,
-  colors: string[]
-): EChartsOption {
-  const days = Array.from(
+// The set of domains present in a catalog-growth bundle (union of catalog and
+// delivered rows), sorted — the source of truth for the view's domain dropdown.
+export function catalogGrowthDomains(g: CatalogGrowth): string[] {
+  return Array.from(
     new Set([
-      ...g.catalog.map((p) => p.day),
-      ...g.delivered.map((p) => p.day),
+      ...g.catalog.map((p) => p.domain),
+      ...g.delivered.map((p) => p.domain),
     ])
   ).sort()
-  const catalogDomains = Array.from(
-    new Set(g.catalog.map((p) => p.domain))
-  ).sort()
-  const deliveredDomains = Array.from(
-    new Set(g.delivered.map((p) => p.domain))
+}
+
+// A real catalog has many domains; one catalog+delivered line pair per domain
+// makes the legend and plot unreadable. So the view filters by a single domain
+// (or aggregates all of them) and this builder always emits exactly two summed
+// series: `selectedDomain === null` sums across every domain, otherwise it
+// restricts to the chosen one.
+export function catalogGrowthOption(
+  g: CatalogGrowth,
+  colors: string[],
+  selectedDomain: string | null = null
+): EChartsOption {
+  const days = Array.from(
+    new Set([...g.catalog.map((p) => p.day), ...g.delivered.map((p) => p.day)])
   ).sort()
 
-  const catalogFor = (domain: string): number[] =>
-    days.map(
-      (d) =>
-        g.catalog.find((p) => p.day === d && p.domain === domain)
-          ?.total_tokens ?? 0
-    )
-  const deliveredFor = (domain: string): number[] =>
-    days.map(
-      (d) =>
-        g.delivered.find((p) => p.day === d && p.domain === domain)?.tokens ?? 0
-    )
+  const inScope = (domain: string): boolean =>
+    selectedDomain === null || domain === selectedDomain
 
+  const catalogSeries = days.map((d) =>
+    g.catalog
+      .filter((p) => p.day === d && inScope(p.domain))
+      .reduce((sum, p) => sum + p.total_tokens, 0)
+  )
+  const deliveredSeries = days.map((d) =>
+    g.delivered
+      .filter((p) => p.day === d && inScope(p.domain))
+      .reduce((sum, p) => sum + p.tokens, 0)
+  )
+
+  const label = selectedDomain ?? 'All domains'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const series: any[] = []
-  catalogDomains.forEach((domain, i) => {
-    series.push({
-      name: `${domain} · catalog`,
+  const series: any[] = [
+    {
+      name: `${label} · catalog`,
       type: 'line',
-      stack: 'catalog',
       areaStyle: { opacity: 0.18 },
       showSymbol: false,
-      data: catalogFor(domain),
-      itemStyle: { color: colors[i % colors.length] },
-    })
-  })
-  deliveredDomains.forEach((domain, i) => {
-    series.push({
-      name: `${domain} · delivered`,
+      data: catalogSeries,
+      itemStyle: { color: colors[0] },
+    },
+    {
+      name: `${label} · delivered`,
       type: 'line',
       lineStyle: { type: 'dashed' },
       showSymbol: false,
-      data: deliveredFor(domain),
-      itemStyle: { color: colors[i % colors.length] },
-    })
-  })
+      data: deliveredSeries,
+      itemStyle: { color: colors[1] },
+    },
+  ]
 
   return {
     tooltip: { trigger: 'axis' },

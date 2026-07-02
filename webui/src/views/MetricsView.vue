@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
 
 import BaseChart from '@/components/BaseChart.vue'
@@ -7,6 +7,7 @@ import ChartCard from '@/components/ChartCard.vue'
 import { useMetrics } from '@/composables/useMetrics'
 import type { MetricsGranularity, MetricsWindow } from '@/types/metrics'
 import {
+  catalogGrowthDomains,
   catalogGrowthOption,
   heatmapOption,
   kitUsageOption,
@@ -93,10 +94,37 @@ const confidenceMix = computed(() =>
 const toolLatency = computed(() =>
   toolLatencyOption(overview.value?.tool_latency ?? [], colors.value)
 )
+// This chart is filtered to one domain at a time (or an aggregate of all) so a
+// many-domain catalog stays readable — see catalogGrowthOption.
+const ALL_DOMAINS = '__all__'
+const selectedDomain = ref<string>(ALL_DOMAINS)
+
+const catalogDomains = computed(() =>
+  catalogGrowthDomains(
+    overview.value?.catalog_growth ?? { catalog: [], delivered: [] }
+  )
+)
+const domainItems = computed(() => [
+  { title: 'All domains', value: ALL_DOMAINS },
+  ...catalogDomains.value.map((d) => ({ title: d, value: d })),
+])
+
+// If the selected domain disappears after a window/granularity change, fall
+// back to the aggregate rather than silently charting an all-zero line.
+watch(catalogDomains, (domains) => {
+  if (
+    selectedDomain.value !== ALL_DOMAINS &&
+    !domains.includes(selectedDomain.value)
+  ) {
+    selectedDomain.value = ALL_DOMAINS
+  }
+})
+
 const catalogGrowth = computed(() =>
   catalogGrowthOption(
     overview.value?.catalog_growth ?? { catalog: [], delivered: [] },
-    pal.value
+    pal.value,
+    selectedDomain.value === ALL_DOMAINS ? null : selectedDomain.value
   )
 )
 
@@ -269,10 +297,20 @@ const health = computed(() => overview.value?.resolve_health)
       <v-col cols="12" md="6">
         <ChartCard
           title="Catalog growth vs delivery"
-          what-it-shows="Total kit tokens in the catalog per domain (filled areas) against tokens actually delivered per domain (dashed lines), day by day."
-          how-to-read="The point of on-demand loading: the catalog can keep growing (areas rise) while delivery for established domains stays flat (dashed lines don't climb with it)."
+          what-it-shows="Total kit tokens in the catalog (filled area) against tokens actually delivered (dashed line), day by day. Use the dropdown to pick a single domain or the aggregate across all domains."
+          how-to-read="The point of on-demand loading: the catalog can keep growing (area rises) while delivery for established domains stays flat (the dashed line doesn't climb with it)."
           :empty="(overview?.catalog_growth.catalog.length ?? 0) === 0"
         >
+          <v-select
+            v-model="selectedDomain"
+            :items="domainItems"
+            label="Domain"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+            style="max-width: 280px"
+          />
           <BaseChart :option="catalogGrowth" :height="320" />
         </ChartCard>
       </v-col>
