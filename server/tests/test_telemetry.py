@@ -312,6 +312,7 @@ def test_records_are_noop_before_init() -> None:
     telemetry.reset_for_test()
     # These must not raise even though no provider/instruments exist yet.
     telemetry.record_gap_request()
+    telemetry.record_gap_detected()
     telemetry.record_tool_call("get_kit", True, 1.0)
     telemetry.record_kit_delivery(
         kit="x", disposition="full", tokens=1, section_ids=[]

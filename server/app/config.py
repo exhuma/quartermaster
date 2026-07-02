@@ -134,6 +134,7 @@ _EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
 _METRICS_LOCAL_DB_DEFAULT = _SERVER_ROOT / "var" / "metrics.db"
 _ROLE_STORE_DEFAULT = _SERVER_ROOT / "var" / "roles.toml"
 _PRIVATE_KITS_DEFAULT = _SERVER_ROOT / "var" / "private-kits"
+_USER_MEMORY_DEFAULT = _SERVER_ROOT / "var" / "user-memory.toml"
 
 
 class Settings(BaseSettings):
@@ -234,6 +235,18 @@ class Settings(BaseSettings):
         permission to create issues in ``github_owner/github_repo``.
     :param github_default_assignee: Optional default assignee username
         to attach to created issues.
+    :param issue_backend: Which maintainer-notification backend
+        materializes kit-extension/gap requests: ``"github"``, ``"gitlab"``,
+        or ``"none"`` (disable). Unset defaults to ``"github"`` for
+        back-compat with deployments that only set ``GITHUB_*`` settings.
+    :param gitlab_base_url: Base URL of the GitLab instance (default
+        ``https://gitlab.com``; override for self-hosted GitLab).
+    :param gitlab_project_id: GitLab project id or URL-encoded path used
+        when materializing kit extension requests as project issues.
+    :param gitlab_token: GitLab personal/project access token with
+        permission to create issues in ``gitlab_project_id``.
+    :param gitlab_default_assignee_id: Optional default assignee user id
+        to attach to created issues.
     :param embeddings_enabled: When true (default), the ``resolve_kits``
         tool uses local embeddings to infer traits and rank sections.
         Degrades to a lexical floor if the embedding dependency or model
@@ -267,6 +280,31 @@ class Settings(BaseSettings):
     :param resolve_elicit_min_confidence: Selection-confidence threshold below
         which ``resolve_kits`` will elicit clarification (when elicitation is
         supported and enabled). Higher values elicit more eagerly.
+    :param gap_detection_enabled: When true (default), ``resolve_kits`` runs a
+        catalog-recall check (see ``app/gap.py``) whenever trait inference
+        finds nothing for a task, to confirm the catalog genuinely has no
+        related content before surfacing a ``gap`` in the response.
+    :param gap_recall_min_score: Minimum cosine similarity (embedding recall
+        path) for a trait pseudo-document to count as a real catalog match;
+        below this, the task is treated as a genuine gap.
+    :param gap_lexical_min_overlap: Minimum word-overlap count (lexical
+        recall path, used when no embedder is available) for a trait
+        pseudo-document to count as a real catalog match.
+    :param user_memory_enabled: When true (default), ``resolve_kits`` derives
+        a small per-caller profile from that caller's own resolve history and
+        uses it as a bounded ranking nudge (never a filter). Set false to
+        disable memory derivation and personalization entirely.
+    :param user_memory_store_path: Path to the per-subject memory TOML file.
+        A rebuildable derived cache, not a source of truth — safe to delete.
+    :param user_memory_ttl_seconds: How long a cached profile is reused
+        before ``resolve_kits`` lazily rebuilds it from metrics history.
+    :param user_memory_half_life_days: Exponential-decay half-life for
+        weighting a caller's resolve history when deriving their profile.
+    :param user_memory_top_domains: Max domains kept in a derived profile.
+    :param user_memory_top_kits: Max kit names kept in a derived profile.
+    :param user_memory_top_languages: Max languages kept in a derived profile.
+    :param user_memory_top_frameworks: Max frameworks kept in a derived
+        profile.
     :param metrics_prometheus_enabled: When true, mount a ``GET /metrics``
         Prometheus pull endpoint (requires the ``telemetry`` extra). OTLP
         push is configured separately via the standard ``OTEL_*`` env vars
@@ -340,6 +378,11 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     github_token: str | None = None
     github_default_assignee: str | None = None
+    issue_backend: str | None = None
+    gitlab_base_url: str = "https://gitlab.com"
+    gitlab_project_id: str | None = None
+    gitlab_token: str | None = None
+    gitlab_default_assignee_id: int | None = None
     # Server-side inference for the one-shot ``resolve_kits`` tool. The
     # embedding baseline is on by default but degrades to a lexical floor when
     # the dependency/model is unavailable (so a slim deployment can set
@@ -364,6 +407,23 @@ class Settings(BaseSettings):
     sampling_enabled: bool = True
     elicitation_enabled: bool = True
     resolve_elicit_min_confidence: float = 0.25
+    # Catalog-recall gap detection: when trait inference finds nothing for a
+    # task, confirm it against the whole catalog (not just the inferred
+    # vocabulary) before treating it as a gap worth reporting. See app/gap.py.
+    gap_detection_enabled: bool = True
+    gap_recall_min_score: float = 0.30
+    gap_lexical_min_overlap: int = 1
+    # Per-user memory: a small, capped profile derived from each caller's own
+    # resolve_kits history (see app/storage/user_memory.py), used only as a
+    # bounded ranking nudge (app/personalization.py) — never a filter.
+    user_memory_enabled: bool = True
+    user_memory_store_path: Path = _USER_MEMORY_DEFAULT
+    user_memory_ttl_seconds: int = 3600
+    user_memory_half_life_days: float = 30.0
+    user_memory_top_domains: int = 5
+    user_memory_top_kits: int = 5
+    user_memory_top_languages: int = 3
+    user_memory_top_frameworks: int = 3
     # Observability (OpenTelemetry metrics + traces). OTLP push is driven by
     # the standard OTEL_* env vars read by the SDK directly; only the
     # Prometheus pull endpoint and its auth posture are Quartermaster toggles.
@@ -404,7 +464,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_kit_config(self) -> Settings:
-        """Ensure at least one kit root is configured with at least one writable layer."""
+        """Ensure a kit root is configured with a writable layer."""
         if self.kit_layers_file is not None:
             self._file_layers = load_layers_from_toml(self.kit_layers_file)
 
@@ -430,13 +490,15 @@ class Settings(BaseSettings):
     @property
     def effective_layers(self) -> list[KitLayerConfig]:
         """
-        Return the ordered list of kit layers (base → overlay, last = highest priority).
+        Return the ordered list of kit layers (base → overlay, last =
+        highest priority).
 
         Precedence: layers from ``kit_layers_file`` (TOML) win; failing that,
         ``kits_root`` is wrapped in a single ``"default"`` layer for
         single-root deployments.
 
-        :returns: Non-empty list of :class:`KitLayerConfig`, lowest priority first.
+        :returns: Non-empty list of :class:`KitLayerConfig`, lowest
+            priority first.
         """
         if self._file_layers is not None:
             return self._file_layers

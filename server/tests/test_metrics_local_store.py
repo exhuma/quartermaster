@@ -32,8 +32,18 @@ def _applicability(**overrides) -> KitApplicability:
         languages=["python"],
         frameworks=[],
         contexts=["backend"],
-        requires={"languages": [], "frameworks": [], "capabilities": [], "contexts": []},
-        excludes={"languages": [], "frameworks": [], "capabilities": [], "contexts": []},
+        requires={
+            "languages": [],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
+        excludes={
+            "languages": [],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
         optional_signals=[],
         related_kits=[],
         priority=50,
@@ -226,3 +236,133 @@ def test_structural_overlap_jaccard(monkeypatch: pytest.MonkeyPatch) -> None:
     # Union adds fw:fastapi and fw:django = 5 total → 3/5 = 0.6.
     cell = next(c for c in result["cells"] if c["x"] == 0 and c["y"] == 1)
     assert cell["value"] == pytest.approx(0.6)
+
+
+def test_record_resolve_persists_subject_and_traits(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_resolve(
+        engine="lexical",
+        confidence="high",
+        coverage=0.75,
+        broadening=False,
+        deliveries=[],
+        delivered_tokens=0,
+        offered_tokens=0,
+        subject="alice",
+        traits_json='{"languages": ["python"]}',
+    )
+    row = store._conn.execute(
+        "SELECT subject, traits_json FROM resolve_events"
+    ).fetchone()
+    assert row["subject"] == "alice"
+    assert row["traits_json"] == '{"languages": ["python"]}'
+
+
+def test_record_resolve_subject_defaults_to_null(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_resolve(
+        engine="lexical",
+        confidence="high",
+        coverage=0.75,
+        broadening=False,
+        deliveries=[],
+        delivered_tokens=0,
+        offered_tokens=0,
+    )
+    row = store._conn.execute(
+        "SELECT subject, traits_json FROM resolve_events"
+    ).fetchone()
+    assert row["subject"] is None
+    assert row["traits_json"] is None
+
+
+def test_init_migrates_pre_existing_db_missing_subject_columns(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE resolve_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            engine TEXT,
+            confidence TEXT,
+            coverage REAL,
+            broadening INTEGER NOT NULL DEFAULT 0,
+            delivered_tokens INTEGER NOT NULL DEFAULT 0,
+            offered_tokens INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    import time as _time
+
+    conn.execute(
+        "INSERT INTO resolve_events "
+        "(ts, engine, confidence, coverage, broadening, delivered_tokens, "
+        " offered_tokens) VALUES (?, 'lexical', 'high', 0.5, 0, 10, 5)",
+        (_time.time(),),
+    )
+    conn.commit()
+    conn.close()
+
+    s = ls.LocalMetricsStore(db_path, retention_days=7)
+    s.init()
+
+    cols = {
+        r["name"]
+        for r in s._conn.execute("PRAGMA table_info(resolve_events)")
+    }
+    assert "subject" in cols
+    assert "traits_json" in cols
+
+    row = s._conn.execute(
+        "SELECT subject, traits_json, engine FROM resolve_events"
+    ).fetchone()
+    assert row["subject"] is None
+    assert row["traits_json"] is None
+    assert row["engine"] == "lexical"
+
+
+def test_resolve_history_for_subject_includes_delivered_kits_and_traits(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_resolve(
+        engine="lexical",
+        confidence="high",
+        coverage=0.75,
+        broadening=False,
+        deliveries=[("kit-a", "inlined", 100), ("kit-b", "offered", 40)],
+        delivered_tokens=100,
+        offered_tokens=40,
+        subject="alice",
+        traits_json='{"languages": ["python"], "frameworks": ["fastapi"]}',
+    )
+    # A different subject's resolve must never leak into alice's history.
+    store.record_resolve(
+        engine="lexical",
+        confidence="high",
+        coverage=0.75,
+        broadening=False,
+        deliveries=[("kit-c", "inlined", 10)],
+        delivered_tokens=10,
+        offered_tokens=0,
+        subject="bob",
+        traits_json="{}",
+    )
+
+    history = store.resolve_history_for_subject("alice", 0.0)
+    assert len(history) == 1
+    event = history[0]
+    assert event["kits"] == ["kit-a"]  # only the delivered (not offered) kit
+    assert '"python"' in event["traits_json"]
+
+
+def test_resolve_history_for_subject_empty_for_unknown_subject(
+    store: ls.LocalMetricsStore,
+) -> None:
+    assert store.resolve_history_for_subject("nobody", 0.0) == []

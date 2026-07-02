@@ -17,14 +17,22 @@ the floor by :func:`_build_trait_engines` when configured.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app import telemetry
+from app.config import get_settings
+from app.gap import detect_gap
+from app.identity import current_sub
 from app.kits import read_kit, select_kits_v2
+from app.notifications import gap_tools_enabled
 from app.observability import local_store
+from app.personalization import apply_memory_nudge
+from app.storage import user_memory
 from app.tokens import count_tokens, estimate_tokens_from_bytes
 from app.traits import (
     SectionRef,
@@ -36,6 +44,7 @@ from app.traits import (
 logger = logging.getLogger(__name__)
 
 _TRAIT_KEYS = ("languages", "frameworks", "capabilities", "contexts")
+_MAX_GAP_TITLE_LEN = 80
 
 
 @dataclass(frozen=True)
@@ -279,6 +288,77 @@ def _section_descriptor(ref: SectionRef, relevance: float) -> dict[str, Any]:
     }
 
 
+def _suggest_gap_title(task: str) -> str:
+    """Return a short issue-title candidate derived from *task*."""
+    collapsed = " ".join(task.split())
+    if len(collapsed) <= _MAX_GAP_TITLE_LEN:
+        return collapsed
+    return collapsed[: _MAX_GAP_TITLE_LEN - 1].rstrip() + "…"
+
+
+def _gap_block(signal: Any) -> dict[str, Any] | None:
+    """Return the public ``gap`` response field, or ``None`` when no gap."""
+    if signal is None:
+        return None
+    return {
+        "detected": True,
+        "reason": signal.reason,
+        "suggested_title": _suggest_gap_title(signal.task),
+        "suggested_summary": signal.task,
+        "discovered_traits": signal.matched_traits,
+        "recall_score": round(signal.best_recall_score, 3),
+        "file_hint": (
+            "Call request_clarification_or_addition to file this gap."
+            if gap_tools_enabled()
+            else "No issue backend configured."
+        ),
+    }
+
+
+def _maybe_apply_memory_nudge(
+    candidates: list[dict[str, Any]], subject: str | None
+) -> list[dict[str, Any]]:
+    """Re-sort *candidates* using the caller's memory profile, when available.
+
+    A no-op (returns *candidates* unchanged) unless all of: the caller is
+    authenticated, settings are valid and ``user_memory_enabled``, and the
+    local metrics store is initialised. Tolerant of any failure — memory
+    personalization must never break a resolve.
+    """
+    if not subject:
+        return candidates
+    try:
+        settings = get_settings()
+    except Exception:  # noqa: BLE001 - e.g. ValidationError during test/startup
+        return candidates
+    if not getattr(settings, "user_memory_enabled", True):
+        return candidates
+    store = local_store.get_store()
+    if store is None:
+        return candidates
+    try:
+        profile = user_memory.get_or_build(
+            settings.user_memory_store_path,
+            subject,
+            store,
+            ttl_seconds=settings.user_memory_ttl_seconds,
+            half_life_days=settings.user_memory_half_life_days,
+            caps=user_memory.ProfileCaps(
+                domains=settings.user_memory_top_domains,
+                kits=settings.user_memory_top_kits,
+                languages=settings.user_memory_top_languages,
+                frameworks=settings.user_memory_top_frameworks,
+            ),
+            now=time.time(),
+        )
+        return apply_memory_nudge(candidates, profile)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "memory nudge failed, using unnudged candidates", exc_info=True
+        )
+        return candidates
+
+
 def resolve_kits(
     *,
     task: str,
@@ -341,6 +421,22 @@ def resolve_kits(
                 "coverage": selection["coverage"],
             },
         )
+
+    # Bounded, familiarity-based re-sort of the already-selected candidates —
+    # never changes which kits were selected, only their order (see
+    # app.personalization for the anti-tunnel-vision bound).
+    selection["candidates"] = _maybe_apply_memory_nudge(
+        selection["candidates"], current_sub()
+    )
+
+    # Trait inference found nothing at all for this task: confirm with a
+    # catalog-recall pass before treating it as a genuine gap (a real match
+    # here means the miss was in wording/inference, not catalog coverage).
+    gap_signal = None
+    if not inferred.has_any():
+        gap_signal = detect_gap(task=task)
+        if gap_signal is not None:
+            telemetry.record_gap_detected()
 
     kits_out: list[dict[str, Any]] = []
     total_delivered = 0
@@ -439,7 +535,10 @@ def resolve_kits(
         },
     )
     # Mirror into the OTEL-independent local store so the in-app Metrics
-    # dashboard has data even when OTLP export is broken/unconfigured.
+    # dashboard has data even when OTLP export is broken/unconfigured. Also
+    # attributes the resolve to the authenticated caller (when present) and
+    # persists the inferred traits, feeding per-user memory derivation (see
+    # app.storage.user_memory) — never a delivery-blocking dependency.
     local_store.record_resolve(
         engine=inferred.engine,
         confidence=selection["confidence"],
@@ -448,6 +547,15 @@ def resolve_kits(
         deliveries=local_deliveries,
         delivered_tokens=total_delivered,
         offered_tokens=total_offered,
+        subject=current_sub(),
+        traits_json=json.dumps(
+            {
+                "languages": inferred.languages,
+                "frameworks": inferred.frameworks,
+                "capabilities": inferred.capabilities,
+                "contexts": inferred.contexts,
+            }
+        ),
     )
     local_store.maybe_snapshot_catalog()
 
@@ -472,4 +580,5 @@ def resolve_kits(
         "broadening_recommended": selection["broadening_recommended"],
         "kits": kits_out,
         "warnings": selection["warnings"],
+        "gap": _gap_block(gap_signal),
     }

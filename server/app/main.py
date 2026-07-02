@@ -10,9 +10,10 @@ Outer FastAPI application that:
     discovery + content tools: ``list_kits``, ``list_available_traits``,
     ``list_prompts``, ``get_prompt``, ``select_kits``, ``resolve_kits``,
     ``explain_kit_candidate``, ``get_kit``, ``list_kit_versions``,
-    and ``compare_kit_versions``.  The GitHub-backed gap tools
+    and ``compare_kit_versions``.  The gap tools
     ``check_existing_gap_issue`` / ``request_clarification_or_addition``
-    are registered only when GitHub is configured.  The mount also ships
+    are registered only when a maintainer-notification backend (GitHub or
+    GitLab) is configured.  The mount also ships
     server-level
     ``instructions`` (see :data:`MCP_INSTRUCTIONS`) describing the
     intended per-task trait-reflection workflow; clients receive it in
@@ -57,6 +58,7 @@ from app.auth import JWTAuthMiddleware
 from app.authz import EditorRequiredError, PrivateKitAccessError
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
+from app.identity import current_sub
 from app.kits import (
     KitConflictError,
     KitLayerNotFoundError,
@@ -83,13 +85,15 @@ from app.middleware import (
     SecurityHeadersMiddleware,
     VersionHeaderMiddleware,
 )
-from app.observability import local_store
-from app.prompts import get_canned_prompt as _get_canned_prompt
-from app.prompts import list_canned_prompts as _list_canned_prompts
-from app.requests import (
+from app.notifications import (
     check_existing_kit_extension_issue as _check_existing_kit_extension_issue,
 )
-from app.requests import request_kit_extension as _request_kit_extension
+from app.notifications import gap_tools_enabled
+from app.notifications import request_kit_extension as _request_kit_extension
+from app.observability import local_store
+from app.personalization import profile_hint
+from app.prompts import get_canned_prompt as _get_canned_prompt
+from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
 from app.routers import (
@@ -116,6 +120,7 @@ from app.sampling import (
     client_supports_elicitation,
     client_supports_sampling,
 )
+from app.storage import user_memory
 from app.storage.kit_writes import KitPathError
 from app.tokens import count_tokens
 from app.traits import load_vocabulary
@@ -178,9 +183,9 @@ For a compact, operational version of this trait-selection routine, fetch the
 bootstrap prompt from the prompt registry (`list_prompts` → `get_prompt`).
 """
 
-# Appended only when the GitHub-backed gap-request tools are registered (i.e.
-# GitHub is configured). When they are not, the agent must not be told to call
-# tools that do not exist.
+# Appended only when the gap-request tools are registered (i.e. a maintainer
+# notification backend is configured). When they are not, the agent must not
+# be told to call tools that do not exist.
 _INSTRUCTIONS_GAP_SENTENCE = (
     "If the task needs a capability no kit covers, call "
     "`check_existing_gap_issue` and then `request_clarification_or_addition` "
@@ -192,35 +197,32 @@ _INSTRUCTIONS_HARDCODE_SENTENCE = (
 )
 
 
-def _build_mcp_instructions(*, github_enabled: bool) -> str:
+def _build_mcp_instructions(*, gap_enabled: bool) -> str:
     """Assemble the server-level MCP instructions.
 
-    The gap-filing sentence is included only when *github_enabled* is true, so
+    The gap-filing sentence is included only when *gap_enabled* is true, so
     the instructions never reference tools that are not registered.
     """
     closing = _INSTRUCTIONS_HARDCODE_SENTENCE
-    if github_enabled:
+    if gap_enabled:
         closing = _INSTRUCTIONS_GAP_SENTENCE + closing
     return f"{_INSTRUCTIONS_BODY}\n{closing}\n"
 
 
-def _github_issue_tools_enabled() -> bool:
-    """Return whether GitHub issue materialization is fully configured.
+def _gap_tools_enabled() -> bool:
+    """Return whether a maintainer-notification backend is configured.
 
-    Reads the same source as :func:`app.requests._require_github_issue_config`
+    Reads the same source as :func:`app.notifications.get_issue_backend`
     (settings, which also honor ``.env``), but tolerates an incompletely
     configured environment so it is safe to call at import time: when required
-    Keycloak settings are absent (e.g. during test collection) the GitHub tools
+    Keycloak settings are absent (e.g. during test collection) the gap tools
     are simply treated as disabled.
     """
     try:
         settings = get_settings()
     except ValidationError:
         return False
-    return all(
-        (getattr(settings, name) or "").strip()
-        for name in ("github_owner", "github_repo", "github_token")
-    )
+    return gap_tools_enabled(settings)
 
 
 def _warm_embeddings() -> None:
@@ -241,8 +243,8 @@ def _warm_embeddings() -> None:
         logger.warning("embedding warmup skipped", exc_info=True)
 
 
-_GITHUB_TOOLS_ENABLED = _github_issue_tools_enabled()
-MCP_INSTRUCTIONS = _build_mcp_instructions(github_enabled=_GITHUB_TOOLS_ENABLED)
+_GAP_TOOLS_ENABLED = _gap_tools_enabled()
+MCP_INSTRUCTIONS = _build_mcp_instructions(gap_enabled=_GAP_TOOLS_ENABLED)
 
 mcp = FastMCP("quartermaster", instructions=MCP_INSTRUCTIONS)
 # Audit per-session tool-call sequences so engagement can be measured (see
@@ -336,10 +338,10 @@ def _register_canned_prompts() -> None:
 _register_canned_prompts()
 
 
-# GitHub-backed tools. Defined unconditionally but only registered with the
-# MCP when GitHub is configured (see the registration block below), so a
-# self-hosted instance with no GitHub credentials never exposes — or reaches
-# out to — GitHub at all.
+# Gap-filing tools. Defined unconditionally but only registered with the MCP
+# when a notification backend is configured (see the registration block
+# below), so a self-hosted instance with no backend credentials never
+# exposes — or reaches out to — GitHub/GitLab at all.
 def check_existing_gap_issue(
     title: str,
     summary: str,
@@ -348,7 +350,7 @@ def check_existing_gap_issue(
     details: str | None = None,
 ) -> dict:
     """
-    Check whether a matching gap issue already exists on GitHub.
+    Check whether a matching gap issue already exists.
 
     Use this before ``request_clarification_or_addition`` to avoid
     creating duplicate issues for the same gap.
@@ -359,7 +361,7 @@ def check_existing_gap_issue(
     :param missing_tools: Optional missing MCP capability names.
     :param details: Optional free-form details.
     :returns: Match status and existing issue metadata when found.
-    :raises ValueError: If required fields are empty or GitHub
+    :raises ValueError: If required fields are empty or the backend
         search fails.
     """
     return _check_existing_kit_extension_issue(
@@ -381,10 +383,9 @@ def request_clarification_or_addition(
     """
     Submit a clarification or MCP-extension request.
 
-    Requests are materialized as GitHub issues when the required
-    repository and token settings are configured. If a matching open
-    issue already exists, no new issue is created and that issue is
-    returned as a duplicate.
+    Requests are materialized as issues on the configured backend (GitHub or
+    GitLab). If a matching open issue already exists, no new issue is
+    created and that issue is returned as a duplicate.
 
     :param title: Short request title.
     :param summary: Short problem summary.
@@ -393,8 +394,8 @@ def request_clarification_or_addition(
     :param details: Optional free-form details.
     :returns: Created issue metadata or duplicate-match metadata and
         normalized request payload.
-    :raises ValueError: If required fields are empty or GitHub
-        issue creation fails.
+    :raises ValueError: If required fields are empty or issue
+        creation fails.
     """
     telemetry.record_gap_request()
     return _request_kit_extension(
@@ -406,12 +407,76 @@ def request_clarification_or_addition(
     )
 
 
-# Only expose the GitHub-backed tools when GitHub is configured. Otherwise they
-# are not registered at all — the agent never sees them and the server makes no
-# outbound GitHub calls (suitable for fully self-hosted / air-gapped installs).
-if _GITHUB_TOOLS_ENABLED:
+# Only expose the gap tools when a notification backend is configured.
+# Otherwise they are not registered at all — the agent never sees them and
+# the server makes no outbound calls (suitable for fully self-hosted /
+# air-gapped installs).
+if _GAP_TOOLS_ENABLED:
     mcp.tool(check_existing_gap_issue)
     mcp.tool(request_clarification_or_addition)
+
+
+def _user_memory_enabled() -> bool:
+    """Return whether per-user memory personalization is enabled.
+
+    Tolerates an incompletely configured environment so it is safe to call
+    at import time (see :func:`_gap_tools_enabled`).
+    """
+    try:
+        settings = get_settings()
+    except ValidationError:
+        return False
+    return bool(getattr(settings, "user_memory_enabled", True))
+
+
+_USER_MEMORY_ENABLED = _user_memory_enabled()
+
+
+def get_my_memory() -> dict:
+    """
+    Return the caller's current derived memory profile.
+
+    A small, capped summary of what the caller's own ``resolve_kits``
+    history tends to touch (top domains/kits/languages/frameworks). Used
+    only as a bounded ranking nudge — never a filter — so it never limits
+    which kits a task can surface.
+
+    :returns: The caller's stored profile, or an empty profile (all lists
+        empty, ``updated`` null) if none has been derived yet or the caller
+        is unauthenticated.
+    """
+    subject = current_sub()
+    if not subject:
+        return user_memory.empty_profile()
+    profile = user_memory.load_profile(
+        get_settings().user_memory_store_path, subject
+    )
+    return profile or user_memory.empty_profile()
+
+
+def reset_my_memory() -> dict:
+    """
+    Clear the caller's derived memory profile.
+
+    Idempotent. The profile is a rebuildable cache derived from the
+    caller's own resolve history, so this only resets the *cached*
+    familiarity nudge — it does not delete any resolve history itself.
+
+    :returns: ``{"cleared": bool}`` — false when there was nothing to clear
+        (including when unauthenticated).
+    """
+    subject = current_sub()
+    if not subject:
+        return {"cleared": False}
+    cleared = user_memory.clear_profile(
+        get_settings().user_memory_store_path, subject
+    )
+    return {"cleared": cleared}
+
+
+if _USER_MEMORY_ENABLED:
+    mcp.tool(get_my_memory)
+    mcp.tool(reset_my_memory)
 
 
 @mcp.tool
@@ -457,6 +522,30 @@ def _settings_or_none() -> Any:
         return None
 
 
+def _sampling_memory_hint(settings: Any) -> str:
+    """Return an advisory memory hint for the sampling prompt, or ``""``.
+
+    Best-effort: no authenticated caller, memory disabled, or any failure
+    all return ``""`` so personalization can never block sampling.
+    """
+    subject = current_sub()
+    if not subject:
+        return ""
+    if settings is not None and not getattr(
+        settings, "user_memory_enabled", True
+    ):
+        return ""
+    path = getattr(settings, "user_memory_store_path", None)
+    if path is None:
+        return ""
+    try:
+        profile = user_memory.load_profile(path, subject)
+        return profile_hint(profile)
+    except Exception as exc:  # hint generation must never break sampling
+        logger.warning("memory hint generation failed: %s", exc)
+        return ""
+
+
 async def _infer_via_sampling(
     task: str, ctx: Context, settings: Any
 ) -> Any:
@@ -477,7 +566,10 @@ async def _infer_via_sampling(
     if not client_supports_sampling(ctx):
         return None
     vocab = await asyncio.to_thread(load_vocabulary)
-    traits = await SamplingTraitEngine().infer_async(task, vocab, ctx)
+    hint = await asyncio.to_thread(_sampling_memory_hint, settings)
+    traits = await SamplingTraitEngine().infer_async(
+        task, vocab, ctx, hint=hint
+    )
     if traits is not None and traits.has_any():
         return traits
     return None
@@ -1104,7 +1196,7 @@ def create_app() -> FastAPI:
     """
     # Configure OpenTelemetry metrics + traces once. Tolerant of an
     # incompletely configured environment (e.g. during test collection),
-    # mirroring _github_issue_tools_enabled.
+    # mirroring _gap_tools_enabled.
     serve_metrics = False
     try:
         settings = get_settings()

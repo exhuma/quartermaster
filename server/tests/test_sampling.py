@@ -123,6 +123,25 @@ def test_sampling_returns_none_on_unexpected_error() -> None:
     assert _run(engine.infer_async("task", _VOCAB, ctx)) is None
 
 
+def test_sampling_prompt_includes_memory_hint_when_provided() -> None:
+    ctx = _FakeContext(
+        text=json.dumps({"frameworks": ["fastapi"], "languages": ["python"]})
+    )
+    engine = SamplingTraitEngine()
+    hint = "Recurring context for this user: python, fastapi (advisory only)."
+    _run(engine.infer_async("add a fastapi endpoint", _VOCAB, ctx, hint=hint))
+    assert hint in ctx.sample_calls[0]["messages"]
+
+
+def test_sampling_prompt_omits_hint_section_when_absent() -> None:
+    ctx = _FakeContext(
+        text=json.dumps({"frameworks": ["fastapi"], "languages": ["python"]})
+    )
+    engine = SamplingTraitEngine()
+    _run(engine.infer_async("add a fastapi endpoint", _VOCAB, ctx))
+    assert "advisory only" not in ctx.sample_calls[0]["messages"]
+
+
 # ---------------------------------------------------------------------------
 # Capability helpers
 # ---------------------------------------------------------------------------

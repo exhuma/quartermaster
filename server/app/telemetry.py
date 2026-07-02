@@ -115,6 +115,7 @@ _kit_delivered_tokens: Any = None
 _section_deliveries: Any = None
 _trait_matched: Any = None
 _gap_requested: Any = None
+_gap_detected: Any = None
 
 # Fingerprint-keyed catalog stats cache and a kit -> domains cache.
 _stats_cache: tuple[str, dict[str, _DomainStats]] | None = None
@@ -488,7 +489,7 @@ def _create_instruments(meter: Any) -> None:
     global _resolve_coverage, _resolve_broadening
     global _resolve_delivered_tokens, _resolve_offered_tokens
     global _kit_deliveries, _kit_delivered_tokens, _section_deliveries
-    global _trait_matched, _gap_requested
+    global _trait_matched, _gap_requested, _gap_detected
     if _instr_meter is meter:
         return
     _instr_meter = meter
@@ -556,6 +557,13 @@ def _create_instruments(meter: Any) -> None:
         "qm.gap.requested",
         unit="1",
         description="Kit-gap requests filed by clients.",
+    )
+    _gap_detected = meter.create_counter(
+        "qm.gap.detected",
+        unit="1",
+        description=(
+            "Catalog gaps detected by resolve_kits (catalog-recall miss)."
+        ),
     )
 
     meter.create_observable_gauge(
@@ -773,6 +781,21 @@ def record_gap_request() -> None:
         _gap_requested.add(1)
     except Exception:  # noqa: BLE001
         logger.debug("record_gap_request failed", exc_info=True)
+
+
+def record_gap_detected() -> None:
+    """Record that ``resolve_kits`` detected a catalog gap.
+
+    Distinct from :func:`record_gap_request`, which counts actual issue
+    filings: this counts every catalog-recall miss, whether or not the
+    agent goes on to file it.
+    """
+    if not _initialized:
+        return
+    try:
+        _gap_detected.add(1)
+    except Exception:  # noqa: BLE001
+        logger.debug("record_gap_detected failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

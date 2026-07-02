@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS resolve_events (
     coverage REAL,
     broadening INTEGER NOT NULL DEFAULT 0,
     delivered_tokens INTEGER NOT NULL DEFAULT 0,
-    offered_tokens INTEGER NOT NULL DEFAULT 0
+    offered_tokens INTEGER NOT NULL DEFAULT 0,
+    subject TEXT,
+    traits_json TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_resolve_ts ON resolve_events (ts);
 
@@ -106,7 +108,8 @@ class LocalMetricsStore:
 
     A single connection is shared behind a lock (``check_same_thread=False``);
     events are tiny and infrequent, so a global lock is simpler than a pool and
-    keeps writes atomic. WAL mode lets the read API run concurrently with writes.
+    keeps writes atomic. WAL mode lets the read API run concurrently with
+    writes.
     """
 
     def __init__(self, db_path: Path, retention_days: int) -> None:
@@ -129,6 +132,7 @@ class LocalMetricsStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_SCHEMA)
+            self._migrate_locked()
             self._conn.commit()
             self._prune_locked()
         # Snapshot outside the lock (it reads the catalog, which can be slow)
@@ -154,12 +158,19 @@ class LocalMetricsStore:
         deliveries: list[tuple[str, str, int]],
         delivered_tokens: int,
         offered_tokens: int,
+        subject: str | None = None,
+        traits_json: str | None = None,
     ) -> None:
         """Record one ``resolve_kits`` call plus its per-kit deliveries.
 
         :param deliveries: ``(kit, disposition, tokens)`` triples delivered by
             this resolve. Written with the new resolve's id so co-occurrence
             (which kits travelled together) is recoverable.
+        :param subject: The caller's stable IdP subject, when authenticated.
+            ``None`` for unattributed/anonymous resolves. Feeds per-user
+            memory derivation (see ``app.storage.user_memory``).
+        :param traits_json: The four inferred trait lists, JSON-encoded, for
+            per-user language/framework affinity derivation.
         """
         now = time.time()
         try:
@@ -170,8 +181,8 @@ class LocalMetricsStore:
                 cur = conn.execute(
                     "INSERT INTO resolve_events "
                     "(ts, engine, confidence, coverage, broadening, "
-                    " delivered_tokens, offered_tokens) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    " delivered_tokens, offered_tokens, subject, traits_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         engine,
@@ -180,6 +191,8 @@ class LocalMetricsStore:
                         1 if broadening else 0,
                         int(delivered_tokens),
                         int(offered_tokens),
+                        subject,
+                        traits_json,
                     ),
                 )
                 resolve_id = cur.lastrowid
@@ -232,7 +245,12 @@ class LocalMetricsStore:
                 conn.execute(
                     "INSERT INTO tool_calls (ts, tool, ok, duration_ms) "
                     "VALUES (?, ?, ?, ?)",
-                    (now, tool or "unknown", 1 if ok else 0, float(duration_ms)),
+                    (
+                        now,
+                        tool or "unknown",
+                        1 if ok else 0,
+                        float(duration_ms),
+                    ),
                 )
                 conn.commit()
                 self._after_write_locked()
@@ -309,6 +327,64 @@ class LocalMetricsStore:
         )
         conn.commit()
 
+    def _migrate_locked(self) -> None:
+        """Add columns introduced after initial release; caller holds the lock.
+
+        ``CREATE TABLE IF NOT EXISTS`` leaves a pre-existing table unchanged,
+        so new columns need an idempotent ``ALTER TABLE`` guard here. Old
+        rows read back ``NULL`` for the new columns (unattributed).
+        """
+        conn = self._conn
+        if conn is None:
+            return
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(resolve_events)")
+        }
+        if "subject" not in cols:
+            conn.execute("ALTER TABLE resolve_events ADD COLUMN subject TEXT")
+        if "traits_json" not in cols:
+            conn.execute(
+                "ALTER TABLE resolve_events ADD COLUMN traits_json TEXT"
+            )
+        conn.commit()
+
+    def resolve_history_for_subject(
+        self, sub: str, cutoff: float
+    ) -> list[dict[str, Any]]:
+        """Return *sub*'s resolve events (with delivered kits) since *cutoff*.
+
+        Feeds per-user memory derivation (see ``app.storage.user_memory``):
+        each item is ``{"ts", "traits_json", "kits"}`` where ``kits`` are the
+        *delivered* (not merely offered) kit names for that resolve.
+        """
+        rows = self._query(
+            "SELECT id, ts, traits_json FROM resolve_events "
+            "WHERE subject = ? AND ts >= ? ORDER BY ts",
+            (sub, cutoff),
+        )
+        if not rows:
+            return []
+        ids = [r["id"] for r in rows]
+        placeholders = ",".join("?" for _ in ids)
+        delivery_rows = self._query(
+            f"SELECT resolve_id, kit FROM deliveries "
+            f"WHERE resolve_id IN ({placeholders}) "
+            f"AND disposition IN ({','.join('?' for _ in _DELIVERED)})",
+            (*ids, *_DELIVERED),
+        )
+        kits_by_resolve: dict[int, list[str]] = {}
+        for row in delivery_rows:
+            kits_by_resolve.setdefault(row["resolve_id"], []).append(row["kit"])
+        return [
+            {
+                "ts": row["ts"],
+                "traits_json": row["traits_json"],
+                "kits": kits_by_resolve.get(row["id"], []),
+            }
+            for row in rows
+        ]
+
     # -- read/aggregate path (used by the /api/metrics endpoint) -----------
 
     def _query(self, sql: str, params: tuple[Any, ...] = ()) -> list[Any]:
@@ -347,8 +423,9 @@ class LocalMetricsStore:
     ) -> list[dict[str, Any]]:
         """Per-bucket delivered vs offered tokens sent to clients.
 
-        *granularity* selects the bucket size (``1h``/``1d``); the ``day`` key is
-        an opaque, sorted bucket label (a date, or ``YYYY-MM-DD HH:00`` hourly).
+        *granularity* selects the bucket size (``1h``/``1d``); the ``day``
+        key is an opaque, sorted bucket label (a date, or
+        ``YYYY-MM-DD HH:00`` hourly).
         """
         fmt = _GRANULARITY_FORMATS.get(granularity, _GRANULARITY_FORMATS["1d"])
         rows = self._query(
@@ -388,7 +465,9 @@ class LocalMetricsStore:
             "SELECT coverage, broadening FROM resolve_events WHERE ts >= ?",
             (cutoff,),
         )
-        coverages = [r["coverage"] for r in cov_rows if r["coverage"] is not None]
+        coverages = [
+            r["coverage"] for r in cov_rows if r["coverage"] is not None
+        ]
         total = len(cov_rows)
         broadening = sum(1 for r in cov_rows if r["broadening"])
         return {
@@ -436,8 +515,8 @@ class LocalMetricsStore:
 
         Built from the distinct ``(resolve_id, kit)`` set so a kit inlined *and*
         offered in one resolve counts once. Cell value is the Jaccard ratio
-        ``together / (times_a + times_b - together)`` in ``[0, 1]``; ``count`` is
-        the raw co-occurrence for tooltips.
+        ``together / (times_a + times_b - together)`` in ``[0, 1]``;
+        ``count`` is the raw co-occurrence for tooltips.
         """
         rows = self._query(
             "SELECT DISTINCT resolve_id, kit FROM deliveries "
@@ -506,7 +585,7 @@ class LocalMetricsStore:
 
         # Delivered tokens per bucket per domain: map kit -> domains at query
         # time (the catalog is small) since deliveries carry no domain column.
-        kit_to_domains = _kit_domain_map()
+        kit_to_domains = kit_domain_map()
         del_rows = self._query(
             f"SELECT strftime('{fmt}', ts, 'unixepoch') AS day, kit, "
             "COALESCE(SUM(tokens), 0) AS tokens FROM deliveries "
@@ -613,7 +692,7 @@ def structural_overlap() -> dict[str, Any]:
     return {"kits": kits, "cells": cells}
 
 
-def _kit_domain_map() -> dict[str, list[str]]:
+def kit_domain_map() -> dict[str, list[str]]:
     """Map kit name -> declared domains (``["unknown"]`` when none)."""
     try:
         from app.kits import iter_catalog
@@ -711,7 +790,9 @@ def init(settings: Any) -> LocalMetricsStore | None:
         try:
             store = LocalMetricsStore(
                 db_path=getattr(settings, "metrics_local_db_path"),
-                retention_days=getattr(settings, "metrics_local_retention_days", 7),
+                retention_days=getattr(
+                    settings, "metrics_local_retention_days", 7
+                ),
             )
             store.init()
             _store = store

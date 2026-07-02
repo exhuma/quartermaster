@@ -8,10 +8,14 @@ role from the role store.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.authz import current_role
+from app.config import get_settings
 from app.media_types import VendorJSONResponse, require_vendor_accept
+from app.storage import user_memory
 
 router = APIRouter(
     prefix="/api",
@@ -30,3 +34,38 @@ def get_me(request: Request) -> dict[str, str]:
         "label": getattr(request.state, "auth_label", "") or "",
         "role": current_role(request),
     }
+
+
+def _require_subject(request: Request) -> str:
+    """Return the authenticated caller, or 401 if somehow absent."""
+    subject = getattr(request.state, "auth_sub", "") or ""
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No authenticated user.",
+        )
+    return subject
+
+
+@router.get("/me/memory")
+def get_my_memory(request: Request) -> dict[str, Any]:
+    """Return the caller's current derived memory profile.
+
+    A small, capped summary of what the caller's own ``resolve_kits``
+    history tends to touch, used only as a bounded ranking nudge — never a
+    filter. Returns an empty profile (``updated`` null) when none has been
+    derived yet.
+    """
+    subject = _require_subject(request)
+    profile = user_memory.load_profile(
+        get_settings().user_memory_store_path, subject
+    )
+    return profile or user_memory.empty_profile()
+
+
+@router.delete("/me/memory", status_code=status.HTTP_204_NO_CONTENT)
+def reset_my_memory(request: Request) -> Response:
+    """Clear the caller's derived memory profile. Idempotent."""
+    subject = _require_subject(request)
+    user_memory.clear_profile(get_settings().user_memory_store_path, subject)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

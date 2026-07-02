@@ -124,6 +124,108 @@ def test_resolve_kits_falls_back_when_sampling_yields_nothing(
     assert captured["pre_inferred"] is None
 
 
+def test_infer_via_sampling_includes_memory_hint(monkeypatch) -> None:
+    from app import main as main_module
+
+    captured: dict = {}
+
+    class _FakeEngine:
+        async def infer_async(self, task, vocab, ctx, *, hint=""):
+            captured["hint"] = hint
+            return None
+
+    monkeypatch.setattr(main_module, "SamplingTraitEngine", _FakeEngine)
+    monkeypatch.setattr(main_module, "load_vocabulary", lambda: None)
+    monkeypatch.setattr(main_module, "current_sub", lambda: "alice")
+    monkeypatch.setattr(
+        main_module.user_memory,
+        "load_profile",
+        lambda path, sub: {
+            "top_languages": ["python"],
+            "top_frameworks": [],
+            "top_domains": [],
+        },
+    )
+
+    settings = type(
+        "S",
+        (),
+        {
+            "sampling_enabled": True,
+            "user_memory_enabled": True,
+            "user_memory_store_path": "/tmp/does-not-matter.toml",
+        },
+    )()
+
+    _run(
+        main_module._infer_via_sampling(
+            "add auth", _FakeCtx(sampling=True), settings
+        )
+    )
+    assert "python" in captured["hint"]
+
+
+def test_infer_via_sampling_hint_empty_when_unauthenticated(
+    monkeypatch,
+) -> None:
+    from app import main as main_module
+
+    captured: dict = {}
+
+    class _FakeEngine:
+        async def infer_async(self, task, vocab, ctx, *, hint=""):
+            captured["hint"] = hint
+            return None
+
+    monkeypatch.setattr(main_module, "SamplingTraitEngine", _FakeEngine)
+    monkeypatch.setattr(main_module, "load_vocabulary", lambda: None)
+    monkeypatch.setattr(main_module, "current_sub", lambda: None)
+
+    settings = type(
+        "S", (), {"sampling_enabled": True, "user_memory_enabled": True}
+    )()
+    _run(
+        main_module._infer_via_sampling(
+            "add auth", _FakeCtx(sampling=True), settings
+        )
+    )
+    assert captured["hint"] == ""
+
+
+def test_infer_via_sampling_hint_empty_when_memory_disabled(
+    monkeypatch,
+) -> None:
+    from app import main as main_module
+
+    captured: dict = {}
+
+    class _FakeEngine:
+        async def infer_async(self, task, vocab, ctx, *, hint=""):
+            captured["hint"] = hint
+            return None
+
+    monkeypatch.setattr(main_module, "SamplingTraitEngine", _FakeEngine)
+    monkeypatch.setattr(main_module, "load_vocabulary", lambda: None)
+    monkeypatch.setattr(main_module, "current_sub", lambda: "alice")
+
+    def _boom(*a, **k):
+        raise AssertionError(
+            "load_profile must not run when memory is disabled"
+        )
+
+    monkeypatch.setattr(main_module.user_memory, "load_profile", _boom)
+
+    settings = type(
+        "S", (), {"sampling_enabled": True, "user_memory_enabled": False}
+    )()
+    _run(
+        main_module._infer_via_sampling(
+            "add auth", _FakeCtx(sampling=True), settings
+        )
+    )
+    assert captured["hint"] == ""
+
+
 def test_resolve_kits_wrapper_maps_value_error(monkeypatch) -> None:
     tool = _get_tool("resolve_kits")
 

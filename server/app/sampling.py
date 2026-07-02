@@ -80,7 +80,7 @@ class SamplingTraitEngine:
     name = "sampling"
 
     async def infer_async(
-        self, task: str, vocab: TraitVocabulary, ctx: Any
+        self, task: str, vocab: TraitVocabulary, ctx: Any, *, hint: str = ""
     ) -> InferredTraits | None:
         """
         Infer traits by sampling the client's model, constrained to *vocab*.
@@ -88,12 +88,17 @@ class SamplingTraitEngine:
         :param task: Natural-language task description.
         :param vocab: The closed trait vocabulary to constrain output to.
         :param ctx: The FastMCP request ``Context`` exposing ``sample``.
+        :param hint: Optional advisory context (e.g. from
+            :func:`app.personalization.profile_hint`) appended to the
+            prompt. Purely informational — never expands *vocab*.
         :returns: Constrained :class:`InferredTraits`, or ``None`` on any
             failure / empty result.
         """
         from app.llm import _constrain_to_vocab
 
         user = _build_user_prompt(task, vocab)
+        if hint:
+            user = f"{user}\n\n{hint}"
         try:
             result = await ctx.sample(
                 user, system_prompt=_SYSTEM_PROMPT, temperature=0
