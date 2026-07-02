@@ -223,6 +223,24 @@ def _github_issue_tools_enabled() -> bool:
     )
 
 
+def _warm_embeddings() -> None:
+    """Eagerly warm the embedding model at startup (best-effort).
+
+    Moves the fastembed model load + trait-vocabulary embedding off the first
+    ``resolve_kits`` request (the cold start that otherwise times out in a
+    fresh pod) and onto startup. Any failure is swallowed: the resolver still
+    degrades to lexical inference at request time, so a cold or missing model
+    must never block the app from starting.
+    """
+    from app import embeddings
+
+    try:
+        if embeddings.warm_up(get_settings()):
+            logger.info("embedding model warmed at startup")
+    except Exception:  # noqa: BLE001 - warmup must not block startup
+        logger.warning("embedding warmup skipped", exc_info=True)
+
+
 _GITHUB_TOOLS_ENABLED = _github_issue_tools_enabled()
 MCP_INSTRUCTIONS = _build_mcp_instructions(github_enabled=_GITHUB_TOOLS_ENABLED)
 
@@ -1102,16 +1120,20 @@ def create_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Init the always-on local metrics store, then run FastMCP's lifespan.
+        """Init the local metrics store, warm embeddings, run FastMCP lifespan.
 
         Composed (not replacing) so the OTEL-independent dashboard store is
         opened once at startup; a failure here never blocks the app (init is
-        itself best-effort).
+        itself best-effort). The embedding warmup is offloaded to a thread so
+        the event loop stays responsive, but startup completes only after it
+        returns — so k8s marks the pod Ready only once the first
+        ``resolve_kits`` will be served warm, not cold.
         """
         try:
             local_store.init(get_settings())
         except Exception:  # noqa: BLE001 - metrics must not block startup
             logger.warning("local metrics store init skipped", exc_info=True)
+        await asyncio.to_thread(_warm_embeddings)
         async with mcp_app.lifespan(app):
             yield
 

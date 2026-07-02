@@ -152,6 +152,32 @@ def build_trait_embeddings(
     return embeddings
 
 
+def warm_up(settings: Any) -> bool:
+    """
+    Eagerly load the embedding model and build the trait-embedding cache.
+
+    Called once at startup so the first ``resolve_kits`` request does not pay
+    the lazy model-load + vocabulary-embedding cost (the cold start that,
+    unmitigated, times out the first request in a fresh pod). Builds the
+    on-disk trait-embedding cache (loading the model on a cache miss) and then
+    forces one encode so the in-memory ONNX session is live even when the disk
+    cache was already warm.
+
+    :param settings: Application settings (reads ``embeddings_cache_dir``).
+    :returns: ``True`` if the embedder was warmed, ``False`` when embeddings
+        are disabled or the dependency/model is unavailable.
+    """
+    embedder = get_embedder(settings)
+    if embedder is None:
+        return False
+    cache_dir = Path(getattr(settings, "embeddings_cache_dir", "."))
+    build_trait_embeddings(embedder, cache_dir)
+    # Guarantee the model is resident even on a trait-embedding cache hit,
+    # where build_trait_embeddings returns without touching the embedder.
+    embedder.encode(["warmup"])
+    return True
+
+
 class EmbeddingTraitEngine:
     """
     Trait inference and section ranking via cosine similarity.
@@ -239,4 +265,5 @@ __all__ = [
     "build_trait_embeddings",
     "cosine",
     "get_embedder",
+    "warm_up",
 ]

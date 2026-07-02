@@ -282,5 +282,38 @@ def test_real_fastembed_model_smoke(tmp_path: Path) -> None:
     assert "fastapi" in result.frameworks
 
 
+def test_warm_up_loads_model_and_populates_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path / "emb",
+        },
+    )()
+
+    assert embeddings.warm_up(settings) is True
+    # The model was exercised (vocab embed + forced load), so the in-memory
+    # ONNX session is live for the first real request.
+    assert fake.calls > 0
+    # The trait-embedding disk cache is now warm: a later build reads it
+    # without re-encoding, proving the first request pays no vocab-embed cost.
+    calls_after_warm = fake.calls
+    build_trait_embeddings(fake, tmp_path / "emb")
+    assert fake.calls == calls_after_warm
+
+
+def test_warm_up_returns_false_when_embedder_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: None)
+    assert embeddings.warm_up(object()) is False
+
+
 def test_module_exposes_protocol() -> None:
     assert hasattr(embeddings, "Embedder")
