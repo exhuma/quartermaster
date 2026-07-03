@@ -8,6 +8,19 @@ project aims to follow semantic versioning.
 
 ### Added
 
+- Long-lived tokens for MCP bearer auth: app tokens (the same credentials used
+  as the WebDAV Basic password) are now accepted as
+  `Authorization: Bearer <token>` on the MCP mount and the REST API. This gives
+  clients that can't refresh OAuth — notably opencode, whose refresh handling
+  is unreliable — a stable credential that never expires. Validation is a
+  fallback in `JWTAuthMiddleware`: a bearer value that is not a JWT is checked
+  against the app-token store (constant-time, same as the DAV/metrics path) and
+  binds to the minting user's subject, so private-kit ownership and roles are
+  unchanged. No new store, endpoint, TTL, or scope — the existing
+  `/api/app-tokens` mechanism is reused as-is. The token mint/list/revoke card
+  is now a shared web-UI component surfaced on both the **Mount** and
+  **Integration** pages, and the Integration page documents the bearer-token
+  setup (opencode static-header config).
 - Authorization with two roles — `editor` (admin: edits the shared catalog and
   grants/revokes editor from others) and `consumer` (read-only, the default).
   An IdP subject (`sub`) → role mapping is persisted as TOML

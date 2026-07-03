@@ -48,6 +48,7 @@ def _settings(dev_secret: str | None = None, audience: str | None = None):
             "protocol/openid-connect/token"
         ),
         dev_shared_secret=dev_secret,
+        app_tokens_path=Path("/nonexistent/tokens.json"),
     )
 
 

@@ -272,6 +272,23 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     "Invalid token audience", self._www_authenticate
                 )
             except jwt.PyJWTError as exc:
+                # Not a valid JWT — it may instead be a long-lived app token
+                # used as a bearer credential (e.g. opencode, whose OIDC
+                # refresh is unreliable). App tokens are opaque random secrets,
+                # not JWTs, so they always land here. This reuses the same
+                # store and constant-time check as the DAV/metrics Basic path;
+                # the token binds to its minting subject exactly like an OIDC
+                # session, so ownership and roles are unchanged.
+                record = app_tokens.verify(
+                    self._settings.app_tokens_path, token
+                )
+                if record:
+                    subject = record["user"]
+                    logger.debug(
+                        "User authenticated via app token: sub=%s", subject
+                    )
+                    _set_identity(request, subject, subject)
+                    return await call_next(request)
                 # Log the detail, but never echo the raw exception text to the
                 # client (module-auth-oidc-python).
                 logger.warning("JWT validation failed: %s", exc)

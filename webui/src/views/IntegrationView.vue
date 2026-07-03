@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import AppTokensCard from '@/components/AppTokensCard.vue'
 import { useIntegration } from '@/composables/useIntegration'
 
 const { info, error, fetchInfo, registerUserAgent } = useIntegration()
@@ -30,24 +31,37 @@ const claudeSnippet = computed(
 
 const opencodeSnippet = computed(
   () => `// ~/.config/opencode/opencode.jsonc
+//
+// RECOMMENDED for opencode: a long-lived token. opencode's OAuth refresh is
+// unreliable, so the OIDC flow below drops the connection once the access
+// token expires. Mint a token in "App tokens" below and send it as a static
+// Authorization header — it never needs refreshing:
 {
   "mcp": {
     "instructions": {
       "type": "remote",
       "url": "${mcpUrl.value}",
-      "oauth": { "clientId": "<public-keycloak-client-id>" }
+      "headers": { "Authorization": "Bearer <your-app-token>" }
     }
   }
 }
+//
+// --- OR, the OAuth flow (may need periodic re-auth) ---
+// {
+//   "mcp": {
+//     "instructions": {
+//       "type": "remote",
+//       "url": "${mcpUrl.value}",
+//       "oauth": { "clientId": "<public-keycloak-client-id>" }
+//     }
+//   }
+// }
 // Use a PUBLIC Keycloak client (NO secret): Client authentication OFF,
 // Standard flow ON, PKCE S256. A confidential client fails the token
 // exchange with invalid_client.
 // Register opencode's callback as a Valid redirect URI:
 //   http://127.0.0.1:19876/mcp/oauth/callback
-// Then authenticate:  opencode mcp auth instructions
-// Need a different port? add e.g.
-//   "redirectUri": "http://127.0.0.1:3118/mcp/oauth/callback"
-// to the "oauth" block and register that exact URI instead.`
+// Then authenticate:  opencode mcp auth instructions`
 )
 
 const copilotSnippet = computed(
@@ -59,8 +73,10 @@ X-Client-Secret: <your-keycloak-client-secret>
 
 const genericSnippet = computed(
   () => `POST ${mcpUrl.value}
-Authorization: Bearer <access-token-from-keycloak>
-# Streamable-HTTP MCP transport.`
+Authorization: Bearer <token>
+# Streamable-HTTP MCP transport. The bearer token may be either a
+# short-lived Keycloak access token or a long-lived app token minted in
+# "App tokens" below (ideal for clients that can't refresh OAuth).`
 )
 
 const regUserAgent = ref('')
@@ -153,6 +169,8 @@ async function submitRegister(): Promise<void> {
           </v-tabs-window>
         </v-card-text>
       </v-card>
+
+      <app-tokens-card />
 
       <v-row>
         <v-col cols="12" md="6">

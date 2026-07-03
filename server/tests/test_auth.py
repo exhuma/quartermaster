@@ -15,11 +15,13 @@ from fastapi.testclient import TestClient
 
 from app.auth import IDPUnavailableError, JWTAuthMiddleware, _build_ssl_context
 from app.config import Settings
+from app.storage import app_tokens
 
 
 def _settings(
     *,
     copilot_auth_enabled: bool,
+    app_tokens_path: object = Path("/nonexistent/tokens.json"),
 ) -> SimpleNamespace:
     """Return a settings-like object for auth middleware tests."""
     return SimpleNamespace(
@@ -41,6 +43,7 @@ def _settings(
             "https://auth.example.com/realms/master/"
             "protocol/openid-connect/token"
         ),
+        app_tokens_path=app_tokens_path,
     )
 
 
@@ -54,6 +57,10 @@ def _client(settings: SimpleNamespace) -> TestClient:
 
     @app.get("/api/protected")
     async def protected() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/kits/probe")
+    async def kits_probe() -> dict[str, str]:
         return {"status": "ok"}
 
     app.add_middleware(
@@ -225,6 +232,95 @@ def test_fixed_headers_return_503_when_idp_unavailable(
     )
     assert response.status_code == 503
     assert "temporarily unavailable" in response.json()["detail"]
+
+
+def test_app_token_bearer_authenticates_mcp(tmp_path: Path) -> None:
+    """A long-lived app token works as a Bearer credential on the MCP mount.
+
+    opencode cannot refresh OIDC tokens, so it mints an app token and sends it
+    as ``Authorization: Bearer <token>``. The token is not a JWT, so it falls
+    through the JWT validator into the app-token fallback.
+    """
+    tokens = tmp_path / "tokens.json"
+    _record, token = app_tokens.mint(tokens, "sub-123", "opencode")
+    client = _client(
+        _settings(copilot_auth_enabled=False, app_tokens_path=tokens)
+    )
+    resp = client.get(
+        "/kits/probe", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+
+
+def test_app_token_bearer_authenticates_rest_api(tmp_path: Path) -> None:
+    """The same app token also authenticates the REST API (both surfaces)."""
+    tokens = tmp_path / "tokens.json"
+    _record, token = app_tokens.mint(tokens, "sub-123", "opencode")
+    client = _client(
+        _settings(copilot_auth_enabled=False, app_tokens_path=tokens)
+    )
+    resp = client.get(
+        "/api/protected", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+
+
+def test_bogus_bearer_token_is_rejected(tmp_path: Path) -> None:
+    """A bearer value that is neither a JWT nor a known app token → 401."""
+    tokens = tmp_path / "tokens.json"
+    app_tokens.mint(tokens, "sub-123", "opencode")  # some token exists
+    client = _client(
+        _settings(copilot_auth_enabled=False, app_tokens_path=tokens)
+    )
+    resp = client.get(
+        "/api/protected",
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid token"
+
+
+def test_revoked_app_token_is_rejected(tmp_path: Path) -> None:
+    """Revoking an app token invalidates it as a bearer credential at once."""
+    tokens = tmp_path / "tokens.json"
+    record, token = app_tokens.mint(tokens, "sub-123", "opencode")
+    client = _client(
+        _settings(copilot_auth_enabled=False, app_tokens_path=tokens)
+    )
+    ok = client.get(
+        "/api/protected", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert ok.status_code == 200
+
+    assert app_tokens.revoke(tokens, record["id"], "sub-123") is True
+    revoked = client.get(
+        "/api/protected", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert revoked.status_code == 401
+
+
+def test_valid_jwt_still_authenticates_when_app_tokens_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A genuine JWT authenticates unchanged; the app-token fallback is a
+    fallback only and never shadows real JWT validation."""
+    tokens = tmp_path / "tokens.json"
+    app_tokens.mint(tokens, "sub-123", "opencode")
+
+    def _valid_token(self: JWTAuthMiddleware, token: str) -> dict:
+        del token
+        return {"sub": "jwt-user", "preferred_username": "alice"}
+
+    monkeypatch.setattr(
+        JWTAuthMiddleware, "_validate_bearer_token", _valid_token
+    )
+    client = _client(
+        _settings(copilot_auth_enabled=False, app_tokens_path=tokens)
+    )
+    resp = client.get(
+        "/api/protected", headers={"Authorization": "Bearer real.jwt.token"}
+    )
+    assert resp.status_code == 200
 
 
 def test_settings_default_copilot_auth_timeout() -> None:
