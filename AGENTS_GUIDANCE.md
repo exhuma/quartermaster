@@ -141,11 +141,12 @@ This project uses the Quartermaster MCP to load instruction kits **per task**,
 not as a fixed list. When a task may touch architecture, tooling, or a new
 capability:
 
-1. **Default to `resolve_kits`** — pass a plain-language task description; it
-   maps the task to traits, ranks kits, and returns the recommendation with
-   each kit's `always_load` sections inlined. Pull anything under
-   `fetch_on_demand` with section-scoped `get_kit`. Use the steps below only
-   when traits are already known or you need finer control.
+1. **Default to `resolve_kits`** — Call it on the initial user-prompt, on any
+   subsequent user-prompts requesting planning or edits, and whenever you
+   transition to plan or make edits during your agentic loop. Pass a
+   plain-language task description; it maps the task to traits, ranks kits,
+   and returns the recommendation with each kit's `always_load` sections inlined.
+   Use the steps below only when traits are already known or you need finer control.
 2. Treat Quartermaster's advertised trait vocabulary as the source of truth —
    call `list_available_traits` and map the request onto supported
    `languages`, `frameworks`, `capabilities`, and `contexts`.
@@ -158,7 +159,11 @@ capability:
 5. For the exact routine, fetch Quartermaster's trait-selection bootstrap
    prompt (`list_prompts` → `get_prompt`) instead of duplicating it here.
 6. Prefer `get_kit_outline` and section-scoped `get_kit` over loading full
-   kits up front.
+   kits up front. To preserve token space, deliver each required section's contents
+   only once per session/conversation. Keep optional section offerings minimal,
+   as they do not consume much context. If previous sections were cleared or
+   "compacted away" from your context by environment policies, you are permitted
+   to re-fetch and re-deliver them.
 ```
 
 What each line of the explicit block is trying to achieve:
@@ -168,8 +173,10 @@ What each line of the explicit block is trying to achieve:
   emerge mid-conversation.
 - **Step 1 (default to `resolve_kits`).** The one-shot path does the trait
   mapping and selection server-side and returns core content inlined, so a
-  well-formed first call replaces the whole loop. Leading with it is what makes
-  agents actually use it instead of treating it as optional.
+  well-formed call replaces the whole loop. We direct the agent to call it
+  whenever a change is planned or initiated (on subsequent user prompts or during
+  agentic loops) so the agent remains perfectly aligned with the latest instruction
+  guardrails throughout the entire session.
 - **Step 2 (source of truth).** Anchors every manual query to the advertised
   vocabulary so the agent stops inventing traits like `internal-service`.
 - **Step 3 (normalize).** Converts the user's natural language into trait
@@ -180,5 +187,7 @@ What each line of the explicit block is trying to achieve:
   Quartermaster — one source, free to evolve — instead of a copy that rots in
   every repo. It also references the registry generically, not a single
   hard-coded prompt name.
-- **Step 6 (outline first).** Defers the largest token cost until the agent
-  is implementing that specific kit.
+- **Step 6 (outline first and deduplicate).** Defers the largest token cost until
+  the agent is implementing that specific kit, enforces single delivery of section
+  contents per session to keep context concise, and explicitly permits re-delivery
+  if context compression wipes them out.

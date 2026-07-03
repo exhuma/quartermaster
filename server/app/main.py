@@ -145,14 +145,24 @@ traits a task touches often only emerge during the conversation: a request to
 kits into scope that were irrelevant before. A static list cannot react to
 that.
 
-**Default path — start every task by calling `resolve_kits`.** Pass a
-plain-language description of the work (`resolve_kits(task="…")`). The server
-maps the task onto its trait vocabulary, ranks the matching kits, and returns
-the recommendation with each kit's `always_load` sections already inlined —
-collapsing the whole discovery sequence into one call and keeping it out of
-your context. Re-run it whenever the task's direction shifts and new traits
-come into scope. Pull any extra sections it lists under `fetch_on_demand` with
-`get_kit(name, sections=[…])` when you reach that aspect.
+**Default path — call `resolve_kits` on any edit or plan.** Run this on the
+initial user-prompt, whenever any subsequent user-prompt requests to make or
+plan changes, and whenever you need to make changes during an internally-driven
+agentic loop. Pass a plain-language description of the work
+(`resolve_kits(task="…")`). The server maps the task onto its trait vocabulary,
+ranks the matching kits, and returns the recommendation with each kit's
+`always_load` sections already inlined — collapsing the whole discovery
+sequence into one call and keeping it out of your context. Re-run it whenever
+the task's direction shifts or new traits come into scope.
+
+**Load lean and handle session state.** Pull any extra sections listed under
+`fetch_on_demand` with `get_kit(name, sections=[…])` when you reach that aspect.
+To preserve token space, deliver each required section's contents only once per
+session/conversation. Offering optional sections can be done multiple times
+(sparingly) as it does not consume much context. Note that because this server
+cannot know whether an already delivered section was "compacted away" by any
+context-compression actions, you may re-fetch and re-deliver a section if you
+deem it appropriate when you see a new request or reach that aspect.
 
 Use the manual loop below only when you need finer control: you have already
 mapped the task to explicit traits, you want to inspect ranking diagnostics,
