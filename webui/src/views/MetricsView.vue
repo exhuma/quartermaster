@@ -13,6 +13,7 @@ import {
   kitUsageOption,
   palette,
   pieOption,
+  type TimeBounds,
   tokensOption,
   toolLatencyOption,
 } from './metricsCharts'
@@ -39,6 +40,29 @@ const windows: { value: MetricsWindow; label: string }[] = [
   { value: '7d', label: '7 days' },
   { value: '30d', label: '30 days' },
 ]
+
+const WINDOW_SECONDS: Record<MetricsWindow, number> = {
+  '24h': 86_400,
+  '7d': 604_800,
+  '30d': 2_592_000,
+}
+
+// Epoch-ms window the time-series x-axes should span, so the selected timespan
+// always shows (even sparse) instead of collapsing to the data extent. Mirror
+// the server's retention cap (min(window, retention)); undefined until the
+// first payload arrives.
+const timeBounds = computed<TimeBounds | undefined>(() => {
+  const meta = overview.value?.meta
+  if (!meta) {
+    return undefined
+  }
+  const end = meta.generated_at * 1000
+  const capped = Math.min(
+    WINDOW_SECONDS[window.value],
+    meta.retention_days * 86_400
+  )
+  return { min: end - capped * 1000, max: end }
+})
 
 onMounted(fetchMetrics)
 
@@ -69,7 +93,12 @@ const kitUsage = computed(() =>
   kitUsageOption(overview.value?.kit_usage ?? [], colors.value)
 )
 const tokens = computed(() =>
-  tokensOption(overview.value?.tokens_timeseries ?? [], colors.value)
+  tokensOption(
+    overview.value?.tokens_timeseries ?? [],
+    colors.value,
+    granularity.value,
+    timeBounds.value
+  )
 )
 const structural = computed(() =>
   heatmapOption(
@@ -124,6 +153,8 @@ const catalogGrowth = computed(() =>
   catalogGrowthOption(
     overview.value?.catalog_growth ?? { catalog: [], delivered: [] },
     pal.value,
+    granularity.value,
+    timeBounds.value,
     selectedDomain.value === ALL_DOMAINS ? null : selectedDomain.value
   )
 )

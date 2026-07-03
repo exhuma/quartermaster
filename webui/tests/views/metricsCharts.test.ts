@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  bucketToEpochMs,
   catalogGrowthDomains,
   catalogGrowthOption,
+  formatBucketUTC,
+  tokensOption,
 } from '@/views/metricsCharts'
-import type { CatalogGrowth } from '@/types/metrics'
+import type { CatalogGrowth, TokenPoint } from '@/types/metrics'
 
 // A two-domain, two-day bundle. "auth" has catalog on both days but delivery
 // only on day 1; "ui" appears on day 2 only — enough to exercise the union of
@@ -42,12 +45,78 @@ const growth: CatalogGrowth = {
   ],
 }
 
+// Series data are [epochMs, value] pairs on the time axis. These helpers pull
+// the value component (and the x component) back out for assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const seriesData = (opt: any, name: string): number[] =>
+const pairs = (opt: any, name: string): [number, number][] =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   opt.series.find((s: any) => s.name === name).data
+const values = (opt: unknown, name: string): number[] =>
+  pairs(opt, name).map((d) => d[1])
 
 const colors = ['#c0', '#c1', '#c2']
+
+describe('bucketToEpochMs', () => {
+  it('parses hourly UTC buckets', () => {
+    expect(bucketToEpochMs('2026-07-02 13:00')).toBe(Date.UTC(2026, 6, 2, 13))
+  })
+
+  it('parses daily UTC buckets to midnight UTC', () => {
+    expect(bucketToEpochMs('2026-07-02')).toBe(Date.UTC(2026, 6, 2))
+  })
+})
+
+describe('formatBucketUTC', () => {
+  it('renders the hour for hourly granularity in UTC', () => {
+    expect(formatBucketUTC(Date.UTC(2026, 6, 2, 13), '1h')).toBe('Jul 02 13:00')
+  })
+
+  it('renders only the date for daily granularity', () => {
+    expect(formatBucketUTC(Date.UTC(2026, 6, 2), '1d')).toBe('Jul 02')
+  })
+})
+
+describe('tokensOption', () => {
+  // A two-day hourly fixture: the old category axis stripped the date and
+  // collapsed missing hours, so these read out of order and looked like a 24h
+  // day. A real time axis must keep them ordered and dated.
+  const points: TokenPoint[] = [
+    { day: '2026-07-01 23:00', delivered: 10, offered: 1 },
+    { day: '2026-07-02 00:00', delivered: 20, offered: 2 },
+    { day: '2026-07-02 01:00', delivered: 30, offered: 3 },
+  ]
+  const cols = { primary: '#111', secondary: '#222' }
+  const bounds = { min: Date.UTC(2026, 6, 1, 23), max: Date.UTC(2026, 6, 2, 1) }
+
+  it('builds a time axis spanning the given bounds', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opt = tokensOption(points, cols, '1h', bounds) as any
+    expect(opt.xAxis.type).toBe('time')
+    expect(opt.xAxis.min).toBe(bounds.min)
+    expect(opt.xAxis.max).toBe(bounds.max)
+  })
+
+  it('emits [epochMs, value] pairs in ascending time order', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opt = tokensOption(points, cols, '1h', bounds) as any
+    const delivered = opt.series[0].data as [number, number][]
+    expect(delivered).toEqual([
+      [Date.UTC(2026, 6, 1, 23), 10],
+      [Date.UTC(2026, 6, 2, 0), 20],
+      [Date.UTC(2026, 6, 2, 1), 30],
+    ])
+    const xs = delivered.map((d) => d[0])
+    expect(xs).toEqual([...xs].sort((a, b) => a - b))
+  })
+
+  it('works without bounds (empty data)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opt = tokensOption([], cols, '1d') as any
+    expect(opt.xAxis.type).toBe('time')
+    expect(opt.xAxis.min).toBeUndefined()
+    expect(opt.series[0].data).toEqual([])
+  })
+})
 
 describe('catalogGrowthDomains', () => {
   it('returns the sorted union of catalog and delivered domains', () => {
@@ -60,28 +129,44 @@ describe('catalogGrowthDomains', () => {
 })
 
 describe('catalogGrowthOption', () => {
-  it('aggregates across all domains when no domain is selected', () => {
-    const opt = catalogGrowthOption(growth, colors)
+  const ms1 = Date.UTC(2026, 0, 1)
+  const ms2 = Date.UTC(2026, 0, 2)
 
-    // Always exactly two series, regardless of domain count.
+  it('aggregates across all domains when no domain is selected', () => {
+    const opt = catalogGrowthOption(growth, colors, '1d')
+
+    // Always exactly two series, regardless of domain count, on a time axis.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((opt.series as any[]).length).toBe(2)
-    // Days sorted ascending.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((opt.xAxis as any).data).toEqual(['2026-01-01', '2026-01-02'])
+    expect((opt.xAxis as any).type).toBe('time')
+    // x components are the UTC epoch ms of each day, ascending.
+    expect(pairs(opt, 'All domains · catalog').map((d) => d[0])).toEqual([
+      ms1,
+      ms2,
+    ])
     // Catalog summed per day across auth + ui.
-    expect(seriesData(opt, 'All domains · catalog')).toEqual([140, 180])
+    expect(values(opt, 'All domains · catalog')).toEqual([140, 180])
     // Delivered summed per day (auth on day 1, ui on day 2).
-    expect(seriesData(opt, 'All domains · delivered')).toEqual([30, 25])
+    expect(values(opt, 'All domains · delivered')).toEqual([30, 25])
   })
 
   it('restricts to a single domain when selected', () => {
-    const opt = catalogGrowthOption(growth, colors, 'auth')
+    const opt = catalogGrowthOption(growth, colors, '1d', undefined, 'auth')
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((opt.series as any[]).length).toBe(2)
-    expect(seriesData(opt, 'auth · catalog')).toEqual([100, 120])
+    expect(values(opt, 'auth · catalog')).toEqual([100, 120])
     // auth was only delivered on day 1.
-    expect(seriesData(opt, 'auth · delivered')).toEqual([30, 0])
+    expect(values(opt, 'auth · delivered')).toEqual([30, 0])
+  })
+
+  it('spans the given time bounds', () => {
+    const bounds = { min: ms1, max: ms2 }
+    const opt = catalogGrowthOption(growth, colors, '1d', bounds)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((opt.xAxis as any).min).toBe(ms1)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((opt.xAxis as any).max).toBe(ms2)
   })
 })
