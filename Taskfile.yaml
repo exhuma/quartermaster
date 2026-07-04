@@ -1,0 +1,84 @@
+# Taskfile for local development — https://taskfile.dev
+#
+# Run `task` (or `task --list`) to see the available tasks. Quick start:
+#   task setup   # create server/.env and install backend + frontend deps
+#   task run     # run the backend and frontend together
+#
+# Note: this project has no database, so there is no migration step — storage
+# is entirely file-backed (TOML + JSON on disk).
+version: '3'
+
+# Load backend config so tasks can honor a QM_KITS_ROOT set in server/.env (see
+# the `backend` task). A missing file is fine — it's created by `task setup`.
+dotenv: ['server/.env']
+
+tasks:
+  default:
+    desc: List the available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Create server/.env from the example and install all dependencies
+    cmds:
+      - task: env
+      - task: install
+
+  env:
+    desc: Create server/.env from server/.env.example if it does not exist
+    dir: server
+    cmds:
+      - cp .env.example .env
+    status:
+      # Already set up when .env exists — nothing to do.
+      - test -f .env
+
+  install:
+    desc: Install backend (uv) and frontend (npm) dependencies
+    cmds:
+      - task: install-backend
+      - task: install-frontend
+
+  install-backend:
+    desc: Install backend dependencies with uv
+    dir: server
+    cmds:
+      - uv sync
+
+  install-frontend:
+    desc: Install frontend dependencies with npm
+    dir: webui
+    cmds:
+      - npm install
+
+  backend:
+    desc: Run the FastAPI/MCP backend (auto-reload) on http://localhost:8000
+    deps:
+      - env
+    dir: server
+    # The kit catalog lives in a SEPARATE repo and is not bundled here, and the
+    # app has no built-in default for it. Point QM_KITS_ROOT at a local dev
+    # catalog (server/var/kits — gitignored) so the backend boots out of the
+    # box; override it by setting QM_KITS_ROOT in server/.env to point at your
+    # real kit-catalog checkout.
+    env:
+      QM_KITS_ROOT: '{{.QM_KITS_ROOT | default "var/kits"}}'
+    cmds:
+      - mkdir -p "$QM_KITS_ROOT"
+      - uv run uvicorn app.main:app --reload
+
+  frontend:
+    desc: Run the Vue/Vuetify dev server on http://localhost:5173
+    dir: webui
+    preconditions:
+      - sh: test -d node_modules
+        msg: 'Frontend deps are not installed — run `task install` (or `task setup`) first.'
+    cmds:
+      - npm run dev
+
+  run:
+    desc: Run the backend and frontend together
+    deps:
+      - backend
+      - frontend
