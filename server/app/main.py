@@ -155,6 +155,21 @@ ranks the matching kits, and returns the recommendation with each kit's
 sequence into one call and keeping it out of your context. Re-run it whenever
 the task's direction shifts or new traits come into scope.
 
+**Re-run triggers — this is a standing behavior, not one-time setup.** Call
+`resolve_kits` again whenever any of these occur, even mid-session:
+- the user asks you to make or plan a change;
+- you begin a new subsystem, feature, or aspect of the work;
+- the task's direction shifts or new traits come into scope (e.g. "add login"
+  becoming OIDC);
+- you resume editing after a context compaction/summarization (re-resolve
+  before your next edit).
+Left to model discretion this behavior *decays over a long session*: agents
+reliably resolve at the start and drift off it later. It stays reliable only
+when the client harness enforces it. If you operate a Quartermaster
+integration, wire that enforcement — see the **Integrate** page in the
+Quartermaster web UI for copy-pasteable Claude Code hooks and equivalents for
+other agents.
+
 **Load lean and handle session state.** Pull any extra sections listed under
 `fetch_on_demand` with `get_kit(name, sections=[…])` when you reach that aspect.
 To preserve token space, deliver each required section's contents only once per
@@ -758,6 +773,11 @@ async def resolve_kits(
     ``always_load`` sections already inlined. Other relevant section ids are
     returned under ``fetch_on_demand`` to pull later via
     ``get_kit(name, sections=[…])``.
+
+    Re-call this whenever the work changes shape — a new change/plan request, a
+    new subsystem or aspect, a direction shift, or right after a context
+    compaction — not just once per session. This is a standing behavior that
+    decays without harness enforcement.
 
     Trait inference prefers MCP **sampling** (the connecting client's own LLM)
     when the client supports it, then degrades to a configured HTTP LLM, local

@@ -8,6 +8,29 @@ project aims to follow semantic versioning.
 
 ### Added
 
+- Harness-enforced `resolve_kits` adoption. Agents reliably call `resolve_kits`
+  at session start but drift off it during ongoing edits: the server's guidance
+  is correct but, left to model discretion, decays over a long session. Two
+  fixes ship together. (1) The MCP `instructions` string and the `resolve_kits`
+  docstring now carry an explicit, checkable **re-run trigger list** — call it
+  again on a change/plan request, when starting a new subsystem/aspect, on a
+  direction shift, and after a context compaction before editing — and state
+  plainly that this is a standing behavior that stays reliable only when the
+  client harness enforces it. (2) A new **harness enforcement** section on the
+  Integrate page ships copy-pasteable Claude Code hooks that reproduce the
+  pattern: a `UserPromptSubmit` reminder (plain stdout injected as context), a
+  non-blocking `PreToolUse` edit nudge that emits an `additionalContext`
+  envelope and stays silent once `resolve_kits` has run this session, and a
+  `PostToolUse` recorder that flips that switch — per-session state keyed on the
+  hook's `session_id` under a gitignored XDG cache dir. The page also documents
+  equivalents for other agents from current research: opencode, Cursor, Cline
+  and Windsurf expose hooks (with examples and caveats — notably opencode has no
+  prompt-submit hook and may not fire tool hooks for MCP calls), while Continue,
+  Aider and Zed are rules-only and get a strongly-worded trigger list instead.
+  The canonical scripts live once under `webui/src/docs/claude-code/`, are
+  inlined into the UI verbatim via Vite `?raw`, are exercised by
+  `server/tests/test_claude_code_hooks.py`, and are dogfooded by this repo's own
+  `.claude/settings.json`.
 - Long-lived tokens for MCP bearer auth: app tokens (the same credentials used
   as the WebDAV Basic password) are now accepted as
   `Authorization: Bearer <token>` on the MCP mount and the REST API. This gives
