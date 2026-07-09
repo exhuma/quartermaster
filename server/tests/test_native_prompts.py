@@ -21,6 +21,9 @@ _EXPECTED = {
     "tech_debt_modernization",
     "greet",
     "integrate_project",
+    "bootstrap_project_skills",
+    "audit_project_skills",
+    "maintain_project_skills",
 }
 
 
