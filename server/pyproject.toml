@@ -62,6 +62,12 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# Ship the bundled markdown text assets (MCP prompt bodies, server-instructions
+# body) inside the wheel; setuptools packages only `.py` by default. Loaded at
+# runtime via app.templating (importlib.resources).
+[tool.setuptools.package-data]
+app = ["assets/**/*.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 # `slow` marks tests that load the real embedding model or hit a live LLM.

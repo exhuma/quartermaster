@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.prompts import get_canned_prompt, list_canned_prompts
+from app.templating import render_asset
 
 
 def test_list_canned_prompts_has_expected_entries() -> None:
@@ -18,7 +19,22 @@ def test_list_canned_prompts_has_expected_entries() -> None:
         "bootstrap_sequence",
         "capability_extension",
         "tech_debt_modernization",
+        "bootstrap_project_skills",
+        "audit_project_skills",
+        "maintain_project_skills",
     }
+
+
+def test_prompt_bodies_load_from_bundled_markdown() -> None:
+    """Every prompt's body is sourced (non-empty) from its bundled markdown."""
+    for prompt in list_canned_prompts():
+        assert prompt["prompt_template"].strip()
+
+
+def test_render_asset_loads_bundled_prompt() -> None:
+    """The templating loader resolves a bundled prompt asset by path."""
+    body = render_asset("prompts", "audit-project-skills.md")
+    assert "Audit Project Skills" in body
 
 
 def test_trait_selection_bootstrap_prompt_is_quartermaster_usage() -> None:
