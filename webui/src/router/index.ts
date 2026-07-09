@@ -28,6 +28,16 @@ const router = createRouter({
   routes: [
     {
       path: '/',
+      name: 'home',
+      component: () => import('@/views/LandingView.vue'),
+      // Public: no `requiresAuth`, so the landing renders before sign-in.
+    },
+    {
+      // The kit list. Path is `/catalog`, not `/kits`: the `/kits/*` prefix is
+      // reserved by the backend MCP mount and 404s in the SPA history fallback
+      // (server/app/webui.py). The route name stays `kits` so existing
+      // `{ name: 'kits' }` links keep resolving here.
+      path: '/catalog',
       name: 'kits',
       component: () => import('@/views/KitListView.vue'),
       meta: { requiresAuth: true },

@@ -28,11 +28,20 @@ watch(
 <template>
   <v-app>
     <v-app-bar color="primary" flat>
-      <v-app-bar-title>Instruction Kits</v-app-bar-title>
+      <v-app-bar-title>
+        <router-link
+          :to="{ name: 'home' }"
+          class="brand text-white text-decoration-none"
+        >
+          Quartermaster
+        </router-link>
+      </v-app-bar-title>
 
       <!-- Primary navigation, absolutely centered within the app bar so it
-           stays centered independent of the title/auth widths on either side. -->
-      <nav class="app-nav">
+           stays centered independent of the title/auth widths on either side.
+           Hidden for anonymous visitors: every target requires auth, so the
+           pre-login shell shows only the brand and Sign in. -->
+      <nav v-if="isAuthenticated" class="app-nav">
         <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
         <v-btn variant="text" :to="{ name: 'private-kits' }">Private</v-btn>
         <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
@@ -50,7 +59,12 @@ watch(
           Sign out
         </v-btn>
       </template>
-      <v-btn v-else variant="text" prepend-icon="mdi-login" @click="login()">
+      <v-btn
+        v-else
+        variant="text"
+        prepend-icon="mdi-login"
+        @click="login('/catalog')"
+      >
         Sign in
       </v-btn>
 
