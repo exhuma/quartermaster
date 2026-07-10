@@ -4,12 +4,20 @@ import { onMounted, watch } from 'vue'
 import { useAuth } from '@/composables/useAuth'
 import { useLoading } from '@/composables/useLoading'
 import { useMe } from '@/composables/useMe'
+import { useThemeMode } from '@/composables/useThemeMode'
 import { authError, retryAuthentication } from '@/auth/reauthGuard'
 import BuildMeta from '@/components/BuildMeta.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 
 const { isAuthenticated, displayName, refresh, login, logout } = useAuth()
 const { isLoading } = useLoading()
 const { isEditor, fetchMe } = useMe()
+
+// Keep the active Vuetify theme in sync with the resolved preference. This
+// covers a live OS `prefers-color-scheme` change while in 'system' mode; an
+// explicit toggle applies itself immediately via setMode.
+const { effectiveName, apply } = useThemeMode()
+watch(effectiveName, apply, { immediate: true })
 
 onMounted(refresh)
 
@@ -27,11 +35,11 @@ watch(
 
 <template>
   <v-app>
-    <v-app-bar color="primary" flat>
+    <v-app-bar color="surface-container-low" flat class="app-bar-tactical">
       <v-app-bar-title>
         <router-link
           :to="{ name: 'home' }"
-          class="brand text-white text-decoration-none"
+          class="brand brand-mark text-primary text-decoration-none"
         >
           Quartermaster
         </router-link>
@@ -42,19 +50,36 @@ watch(
            Hidden for anonymous visitors: every target requires auth, so the
            pre-login shell shows only the brand and Sign in. -->
       <nav v-if="isAuthenticated" class="app-nav">
-        <v-btn variant="text" :to="{ name: 'kits' }">Kits</v-btn>
-        <v-btn variant="text" :to="{ name: 'private-kits' }">Private</v-btn>
-        <v-btn variant="text" :to="{ name: 'integration' }">Integrate</v-btn>
-        <v-btn variant="text" :to="{ name: 'mount' }">Mount</v-btn>
-        <v-btn variant="text" :to="{ name: 'metrics' }">Metrics</v-btn>
-        <v-btn v-if="isEditor" variant="text" :to="{ name: 'admin-users' }">
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'kits' }"
+          >Kits</v-btn
+        >
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'private-kits' }">
+          Private
+        </v-btn>
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'integration' }">
+          Integrate
+        </v-btn>
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'mount' }"
+          >Mount</v-btn
+        >
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'metrics' }">
+          Metrics
+        </v-btn>
+        <v-btn
+          v-if="isEditor"
+          variant="text"
+          class="nav-btn"
+          :to="{ name: 'admin-users' }"
+        >
           Users
         </v-btn>
       </nav>
 
       <v-spacer />
       <template v-if="isAuthenticated">
-        <span class="mr-2 text-body-2">{{ displayName }}</span>
+        <span class="mr-2 text-body-2 font-mono text-on-surface-variant">
+          {{ displayName }}
+        </span>
         <v-btn variant="text" prepend-icon="mdi-logout" @click="logout()">
           Sign out
         </v-btn>
@@ -67,6 +92,10 @@ watch(
       >
         Sign in
       </v-btn>
+
+      <!-- Light/dark/system colour-scheme switcher. Always available, signed
+           in or not; follows the OS by default and persists an explicit pick. -->
+      <ThemeToggle class="ml-1" />
 
       <!-- Build identity (repo link + commit). Hidden when its build-time
            env vars are unset; low-visibility so it does not distract. -->
@@ -104,6 +133,21 @@ watch(
 </template>
 
 <style scoped>
+/* Blueprint casing: separate the bar from the navy canvas with a 1px outline
+   rather than an elevation shadow. */
+.app-bar-tactical {
+  border-bottom: 1px solid rgb(var(--v-theme-outline-variant));
+}
+
+/* Brand: brass, heavy, tightly tracked, displayed uppercase (the DOM text
+   stays "Quartermaster" so tests and screen readers read it normally). */
+.brand-mark {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
 /* Primary nav centered within the app bar regardless of the differing
    widths of the title (left) and auth controls (right). */
 .app-nav {
@@ -112,6 +156,20 @@ watch(
   transform: translateX(-50%);
   display: flex;
   gap: 0.25rem;
+}
+
+/* Mono, uppercase "stamped" nav labels; the active route gets a brass
+   underline (the treatment from the mockups). */
+.nav-btn {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.8rem;
+}
+.nav-btn.v-btn--active {
+  color: rgb(var(--v-theme-primary));
+  border-bottom: 2px solid rgb(var(--v-theme-primary));
+  border-radius: 0;
 }
 
 /* Low-visibility build-identity strip; full opacity on hover. */

@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 
 import { useRoles } from '@/composables/useRoles'
 import type { RoleRow } from '@/composables/useRoles'
+import SectionHeader from '@/components/SectionHeader.vue'
 
 const { roles, error, fetchRoles, setRole, removeRole } = useRoles()
 
@@ -55,8 +56,12 @@ async function promote(row: RoleRow): Promise<void> {
 
 <template>
   <v-container>
+    <SectionHeader
+      title="Users &amp; roles"
+      subtitle="Editors can modify the shared kit catalog and manage roles. Everyone else is a read-only consumer. Bootstrap editors (from QM_INITIAL_EDITORS) cannot be revoked here."
+      tag="ACCESS_CONTROL"
+    />
     <div class="d-flex align-center mb-4">
-      <h1 class="text-h5 font-weight-medium">Users &amp; roles</h1>
       <v-spacer />
       <v-btn
         color="primary"
@@ -66,11 +71,6 @@ async function promote(row: RoleRow): Promise<void> {
         Grant editor
       </v-btn>
     </div>
-    <p class="text-body-2 text-medium-emphasis mb-4">
-      Editors can modify the shared kit catalog and manage roles. Everyone else
-      is a read-only consumer. Bootstrap editors (from
-      <code>QM_INITIAL_EDITORS</code>) cannot be revoked here.
-    </p>
 
     <v-alert
       v-if="error || actionError"

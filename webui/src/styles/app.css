@@ -1,0 +1,56 @@
+/*
+ * Global styling for the "Tactical Provisioning System" design system.
+ *
+ * Colours live in the Vuetify theme (src/plugins/vuetify.ts) and are referenced
+ * through theme tokens — this file only carries the two things Vuetify tokens
+ * cannot express: the brand font wiring and a few reusable visual motifs
+ * (mono labels, card serial numbers, brass glow, section labels). Keep it small;
+ * prefer Vuetify utility classes in components.
+ */
+
+/* Brand fonts (loaded in index.html). Hanken Grotesk is the app-wide face;
+   JetBrains Mono is opt-in via .font-mono for labels/serials/code. */
+.v-application {
+  font-family: 'Hanken Grotesk', 'Segoe UI', Roboto, sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+/* Monospaced, tracked, uppercase "stamped equipment" label — used for nav
+   items, chips, and metadata overlays. */
+.qm-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Section eyebrow tag, e.g. "[ SECURITY_ROOT ]" seen in the mockups. */
+.qm-section-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: rgb(var(--v-theme-primary));
+  opacity: 0.85;
+}
+
+/* Card "serial number" motif: a faint mono code pinned to a card's top-right,
+   reinforcing the equipment-casing look. Host element must be positioned. */
+.qm-serial {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Illuminated-hardware glow for high-priority (primary) actions/panels. */
+.qm-glow {
+  box-shadow: 0 0 18px rgba(233, 193, 118, 0.18);
+}

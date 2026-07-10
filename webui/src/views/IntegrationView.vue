@@ -335,10 +335,11 @@ async function submitRegister(): Promise<void> {
 
       <v-alert type="warning" variant="tonal" class="mb-6">
         <div class="font-weight-medium mb-1">The adoption problem</div>
-        Static <code>AGENTS.md</code> / <code>CLAUDE.md</code> guidance is loaded
-        once and then <strong>decays</strong> over a long session — agents
-        reliably resolve at the start and drift off it as the work moves on.
-        <code>resolve_kits</code> needs to be <strong>re-called mid-task</strong>
+        Static <code>AGENTS.md</code> / <code>CLAUDE.md</code> guidance is
+        loaded once and then <strong>decays</strong> over a long session —
+        agents reliably resolve at the start and drift off it as the work moves
+        on. <code>resolve_kits</code> needs to be
+        <strong>re-called mid-task</strong>
         (new subsystem, direction shift, after a context compaction). Don't rely
         on model discretion; enforce it in the harness.
       </v-alert>
@@ -349,13 +350,15 @@ async function submitRegister(): Promise<void> {
           <p class="mb-4">
             Three small hooks reproduce the pattern: a per-prompt reminder, a
             non-blocking pre-edit nudge that stays silent once you've resolved
-            this session, and a recorder that flips that switch. Drop the scripts
-            in <code>.claude/hooks/</code> (<code>chmod +x</code>) and the config
-            in <code>.claude/settings.json</code>.
+            this session, and a recorder that flips that switch. Drop the
+            scripts in <code>.claude/hooks/</code> (<code>chmod +x</code>) and
+            the config in <code>.claude/settings.json</code>.
           </p>
 
           <div class="d-flex align-center mb-1">
-            <div class="text-subtitle-2"><code>.claude/settings.json</code></div>
+            <div class="text-subtitle-2">
+              <code>.claude/settings.json</code>
+            </div>
             <v-spacer />
             <v-btn
               size="small"
@@ -388,7 +391,9 @@ async function submitRegister(): Promise<void> {
           <div class="d-flex align-center mb-1">
             <div class="text-subtitle-2">
               <code>.claude/hooks/qm-edit-reminder.sh</code>
-              <span class="text-medium-emphasis">— PreToolUse (non-blocking)</span>
+              <span class="text-medium-emphasis"
+                >— PreToolUse (non-blocking)</span
+              >
             </div>
             <v-spacer />
             <v-btn
@@ -426,21 +431,23 @@ async function submitRegister(): Promise<void> {
             <em>plain text</em> — no JSON envelope. For <code>PreToolUse</code>,
             emit a JSON object to add context without blocking the edit:
           </p>
-          <pre class="snippet mb-4">{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"…"}}</pre>
+          <pre class="snippet mb-4">
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"…"}}</pre
+          >
           <p class="mb-4">
             Omitting <code>permissionDecision</code> keeps it non-blocking — the
-            edit proceeds and the text is added as context. The per-session state
-            key comes from <code>session_id</code> on the hook's stdin (read with
-            <code>jq</code>); state is written under
+            edit proceeds and the text is added as context. The per-session
+            state key comes from <code>session_id</code> on the hook's stdin
+            (read with <code>jq</code>); state is written under
             <code>$XDG_CACHE_HOME/quartermaster/sessions/</code> so it's outside
             the repo and never committed.
           </p>
 
           <v-alert type="info" variant="tonal" density="comfortable">
             <code>.claude/</code> is often gitignored. Decide deliberately
-            whether to commit these hooks: commit them for team-wide enforcement,
-            or keep them local (and gitignore any project-local state dir you
-            choose instead of the XDG cache).
+            whether to commit these hooks: commit them for team-wide
+            enforcement, or keep them local (and gitignore any project-local
+            state dir you choose instead of the XDG cache).
           </v-alert>
         </v-card-text>
       </v-card>
@@ -463,20 +470,22 @@ async function submitRegister(): Promise<void> {
             <v-tabs-window-item value="opencode">
               <p class="mb-3">
                 <strong>Has hooks (with caveats).</strong> opencode's plugin API
-                exposes <code>tool.execute.before</code>/<code>.after</code> plus
-                session/TUI events, but <em>no</em> first-class prompt-submit
-                hook, and MCP tool calls may not reliably trigger tool hooks
-                (sst/opencode#2319). Best-effort nudge on local edit tools; pair
-                it with the rules trigger list.
+                exposes <code>tool.execute.before</code>/<code>.after</code>
+                plus session/TUI events, but <em>no</em> first-class
+                prompt-submit hook, and MCP tool calls may not reliably trigger
+                tool hooks (sst/opencode#2319). Best-effort nudge on local edit
+                tools; pair it with the rules trigger list.
               </p>
               <pre class="snippet">{{ opencodePlugin }}</pre>
             </v-tabs-window-item>
             <v-tabs-window-item value="cursor">
               <p class="mb-3">
-                <strong>Has hooks (≥ 1.7).</strong> <code>beforeSubmitPrompt</code>
-                injects context each prompt; <code>afterFileEdit</code>,
-                <code>preToolUse</code>/<code>postToolUse</code> and
-                <code>beforeMCPExecution</code> are also available (JSON on
+                <strong>Has hooks (≥ 1.7).</strong>
+                <code>beforeSubmitPrompt</code> injects context each prompt;
+                <code>afterFileEdit</code>, <code>preToolUse</code>/<code
+                  >postToolUse</code
+                >
+                and <code>beforeMCPExecution</code> are also available (JSON on
                 stdin/stdout).
               </p>
               <pre class="snippet">{{ cursorHooks }}</pre>
@@ -498,12 +507,17 @@ async function submitRegister(): Promise<void> {
             </v-tabs-window-item>
             <v-tabs-window-item value="rules">
               <p class="mb-3">
-                <strong>Rules only — no programmable pre-edit/pre-prompt hooks
-                today:</strong> <em>Continue</em> (rules files),
-                <em>Aider</em> (<code>CONVENTIONS.md</code> / read files), and
-                <em>Zed</em> (static <code>.rules</code>; agent lifecycle hooks
-                are still open feature requests). You can't force a re-resolve,
-                so state it as forcefully as possible in the rules file:
+                <strong
+                  >Rules only — no programmable pre-edit/pre-prompt hooks
+                  today:</strong
+                >
+                <em>Continue</em> (rules files), <em>Aider</em> (<code
+                  >CONVENTIONS.md</code
+                >
+                / read files), and <em>Zed</em> (static <code>.rules</code>;
+                agent lifecycle hooks are still open feature requests). You
+                can't force a re-resolve, so state it as forcefully as possible
+                in the rules file:
               </p>
               <pre class="snippet">{{ rulesTriggerList }}</pre>
             </v-tabs-window-item>
@@ -528,8 +542,8 @@ async function submitRegister(): Promise<void> {
               <code>resolve_kits</code>.
             </li>
             <li>
-              <strong>Silent after resolve:</strong> run the record hook for that
-              session, then the PreToolUse hook prints nothing.
+              <strong>Silent after resolve:</strong> run the record hook for
+              that session, then the PreToolUse hook prints nothing.
             </li>
             <li>
               <strong>Re-nudge in a new session:</strong> a different
@@ -540,10 +554,12 @@ async function submitRegister(): Promise<void> {
               <code>settings.json</code> wires all three matchers.
             </li>
           </ul>
-          <pre class="snippet">echo '{"session_id":"s1"}' | ./.claude/hooks/qm-edit-reminder.sh   # nudges (JSON)
+          <pre class="snippet">
+echo '{"session_id":"s1"}' | ./.claude/hooks/qm-edit-reminder.sh   # nudges (JSON)
 echo '{"session_id":"s1"}' | ./.claude/hooks/qm-record-resolve.sh  # record resolve
 echo '{"session_id":"s1"}' | ./.claude/hooks/qm-edit-reminder.sh   # silent
-echo '{"session_id":"s2"}' | ./.claude/hooks/qm-edit-reminder.sh   # nudges again</pre>
+echo '{"session_id":"s2"}' | ./.claude/hooks/qm-edit-reminder.sh   # nudges again</pre
+          >
         </v-card-text>
       </v-card>
     </section>
@@ -554,7 +570,7 @@ echo '{"session_id":"s2"}' | ./.claude/hooks/qm-edit-reminder.sh   # nudges agai
 .snippet {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.85rem;
 }
 </style>

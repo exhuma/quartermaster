@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue'
 
 import { useKits } from '@/composables/useKits'
 import { useMe } from '@/composables/useMe'
+import SectionHeader from '@/components/SectionHeader.vue'
+import StatusChip from '@/components/StatusChip.vue'
 
 const { kits, error, fetchKits, createKit, deleteKit } = useKits()
 const { isEditor, fetchMe } = useMe()
@@ -54,8 +56,12 @@ async function confirmDelete(): Promise<void> {
 
 <template>
   <v-container>
+    <SectionHeader
+      title="Instruction kits"
+      subtitle="The shared catalog your agents draw from. Open a kit to read its sections, versions, and applicability."
+      tag="KIT_INVENTORY"
+    />
     <div class="d-flex align-center mb-4">
-      <h1 class="text-h5 font-weight-medium">Instruction kits</h1>
       <v-spacer />
       <v-btn
         v-if="isEditor"
@@ -89,9 +95,7 @@ async function confirmDelete(): Promise<void> {
           </router-link>
         </template>
         <template #item.source_layer="{ item }">
-          <v-chip v-if="item.source_layer" size="small" variant="tonal">
-            {{ item.source_layer }}
-          </v-chip>
+          <StatusChip v-if="item.source_layer" :label="item.source_layer" />
           <span v-else class="text-medium-emphasis">—</span>
         </template>
         <template #item.versions="{ item }">
@@ -99,7 +103,7 @@ async function confirmDelete(): Promise<void> {
             v-for="v in item.versions"
             :key="v"
             size="small"
-            class="mr-1"
+            class="mr-1 font-mono"
             variant="tonal"
           >
             {{ v }}

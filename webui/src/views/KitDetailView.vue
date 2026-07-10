@@ -332,7 +332,7 @@ async function runCompare(): Promise<void> {
 .changelog {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.85rem;
 }
 </style>

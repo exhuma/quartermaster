@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Quartermaster — a self-hosted MCP server that serves versioned AI instruction kits to coding agents, loaded per task and never copied into your repository."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Quartermaster</title>
+    <!--
+      Brand fonts for the tactical design system: Hanken Grotesk (display/body)
+      and JetBrains Mono (labels, serial numbers, code). Loaded from Google
+      Fonts; wired into Vuetify via .v-application in src/styles/app.css.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <!--
       Load the runtime config BEFORE the app bundle. In production the
       server serves /config.js rendered from its settings; in local dev

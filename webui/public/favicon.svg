@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Quartermaster">
+  <!-- Tactical brand mark: a brass supply crate with a "Q" tail, on Mission Navy. -->
+  <rect width="64" height="64" rx="10" fill="#051424"/>
+  <g fill="none" stroke="#e9c176" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Crate outline -->
+    <path d="M32 12 L52 22 V42 L32 52 L12 42 V22 Z"/>
+    <!-- Top seam -->
+    <path d="M12 22 L32 32 L52 22"/>
+    <!-- Vertical seam -->
+    <path d="M32 32 V52"/>
+  </g>
+  <!-- "Q" tail: a short brass stroke breaking the lower-right corner -->
+  <path d="M40 40 L50 50" stroke="#e9c176" stroke-width="4" stroke-linecap="round"/>
+</svg>
