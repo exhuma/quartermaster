@@ -102,3 +102,64 @@ def test_overview_without_store_still_serves(tmp_path: Path) -> None:
     assert body["meta"]["store_enabled"] is False
     assert body["kit_usage"] == []
     assert "structural_overlap" in body
+
+
+# ---------------------------------------------------------------------------
+# Per-kit version-adoption route
+# ---------------------------------------------------------------------------
+
+
+def _fake_kits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.kits import KitInfo
+
+    monkeypatch.setattr(
+        metrics_router,
+        "list_all_kits",
+        lambda: [
+            KitInfo(
+                name="kit-alpha",
+                description="d",
+                versions=["v1", "v2"],
+                latest_version="v2",
+            )
+        ],
+    )
+
+
+def test_version_adoption_returns_vendor_series(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_kits(monkeypatch)
+    store = local_store.get_store()
+    store.record_kit_version_use(kit="kit-alpha", version="v1")
+    store.record_kit_version_use(kit="kit-alpha", version="v2")
+    store.record_kit_version_use(kit="kit-alpha", version="v2")
+
+    resp = client.get("/api/kits/kit-alpha/version-adoption")
+    assert resp.status_code == 200
+    assert VENDOR_MEDIA_TYPE in resp.headers["content-type"]
+    body = resp.json()
+    assert body["meta"]["kit"] == "kit-alpha"
+    assert body["meta"]["available_versions"] == ["v1", "v2"]
+    assert body["versions"] == ["v1", "v2"]
+    assert len(body["buckets"]) == 1
+    assert body["buckets"][0]["counts"] == {"v1": 1, "v2": 2}
+
+
+def test_version_adoption_unknown_kit_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_kits(monkeypatch)
+    resp = client.get("/api/kits/ghost/version-adoption")
+    assert resp.status_code == 404
+
+
+def test_version_adoption_rejects_bare_json(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_kits(monkeypatch)
+    resp = client.get(
+        "/api/kits/kit-alpha/version-adoption",
+        headers={"Accept": "application/json"},
+    )
+    assert resp.status_code == 406

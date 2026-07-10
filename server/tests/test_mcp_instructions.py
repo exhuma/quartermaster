@@ -54,3 +54,13 @@ def test_instructions_point_to_bootstrap_prompt_registry() -> None:
     """
     assert "list_prompts" in MCP_INSTRUCTIONS
     assert "get_prompt" in MCP_INSTRUCTIONS
+
+
+def test_instructions_cover_version_pinning() -> None:
+    """The description tells agents how to remember a kit's pinned major."""
+    text = MCP_INSTRUCTIONS
+    assert ".quartermaster.toml" in text
+    assert "version_advisory" in text
+    assert "pin" in text.lower()
+    # Points at the canonical pin-file prompt for the full workflow.
+    assert "quartermaster_pin_file" in text

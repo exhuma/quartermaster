@@ -8,7 +8,7 @@ import json
 import tomllib
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -121,6 +121,53 @@ def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
             KitLayerConfig(name=name, path=layer_path, readonly=readonly)
         )
     return layers
+
+
+def load_version_policy_from_toml(
+    file_path: Path,
+) -> dict[str, dict[str, Any]]:
+    """
+    Parse an optional per-kit version-policy TOML file.
+
+    The operator declares, per kit, a minimum acceptable major and/or a
+    list of deprecated majors. Quartermaster only *surfaces* this in the
+    ``version_advisory``; the calling agent enforces it (prompt/refuse)::
+
+        [kits.module-auth-oidc]
+        min_version = "v2"
+        deprecated = ["v1"]
+
+    :param file_path: Path to the policy TOML file.
+    :returns: ``{kit_name: {"min_version": str | None,
+        "deprecated": list[str]}}`` (empty when the file is absent).
+    :raises ValueError: If the document is not valid TOML.
+    """
+    if not file_path.exists():
+        return {}
+    try:
+        raw = tomllib.loads(file_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(
+            f"Version policy file {file_path} is not valid TOML: {exc}"
+        ) from exc
+    kits = raw.get("kits", {})
+    policy: dict[str, dict[str, Any]] = {}
+    if isinstance(kits, dict):
+        for name, entry in kits.items():
+            if not isinstance(entry, dict):
+                continue
+            min_version = entry.get("min_version")
+            deprecated = entry.get("deprecated", [])
+            policy[str(name)] = {
+                "min_version": (
+                    str(min_version) if min_version else None
+                ),
+                "deprecated": [
+                    str(v) for v in deprecated
+                    if isinstance(deprecated, list)
+                ],
+            }
+    return policy
 
 
 # Server package root (server/), used for dev-only default data paths.
@@ -435,6 +482,20 @@ class Settings(BaseSettings):
     metrics_local_enabled: bool = True
     metrics_local_db_path: Path = _METRICS_LOCAL_DB_DEFAULT
     metrics_local_retention_days: int = 7
+    # Kit version pinning (see app/kits.py resolve_effective_version). Repos
+    # record their per-kit major in a repo-side .quartermaster.toml; the server
+    # is stateless about pins. These toggles cover the two things the server
+    # *can* own: adoption telemetry and an optional operator version policy.
+    version_telemetry_enabled: bool = True
+    # When true (default), an unpinned kit that has shipped a breaking change is
+    # served at its earliest major with an upgrade advisory. Set false to revert
+    # to latest-wins for unpinned multi-version kits.
+    conservative_default_enabled: bool = True
+    # Optional per-kit min_version/deprecated policy, surfaced in the advisory.
+    version_policy_file: Path | None = None
+    _version_policy: dict[str, dict[str, Any]] | None = PrivateAttr(
+        default=None
+    )
 
     # Layers parsed from ``kit_layers_file`` once, at validation time, so the
     # file is read a single time and ``effective_layers`` stays cheap.
@@ -504,6 +565,22 @@ class Settings(BaseSettings):
             return self._file_layers
         # kits_root is guaranteed non-None here by the model validator
         return [KitLayerConfig(name="default", path=self.kits_root)]  # type: ignore[arg-type]
+
+    def version_policy(self) -> dict[str, dict[str, Any]]:
+        """
+        Return the parsed per-kit version policy (cached), or ``{}``.
+
+        Read once from ``version_policy_file`` on first access; a missing
+        file yields an empty policy (no constraints).
+        """
+        if self._version_policy is None:
+            if self.version_policy_file is not None:
+                self._version_policy = load_version_policy_from_toml(
+                    Path(self.version_policy_file)
+                )
+            else:
+                self._version_policy = {}
+        return self._version_policy
 
     @computed_field  # type: ignore[prop-decorator]
     @property

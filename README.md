@@ -118,6 +118,14 @@ The server ships this workflow as MCP-level `instructions`, so compliant
 clients surface it automatically on connect. Hard-coding kits is acceptable
 only when a project's relevant kits are genuinely stable.
 
+When a kit ships a **breaking change** it gains a new major (`v2`) alongside
+`v1`. So a repo keeps following the conventions it was built with, the agent
+records the major it follows per kit in a repo-side `.quartermaster.toml` file
+(the server stays stateless about pins and never writes to your repo). Requesting
+a multi-version kit without a pin serves the earliest major plus an upgrade
+advisory the agent surfaces before writing the chosen pin. See
+[QUARTERMASTER_TOML.md](QUARTERMASTER_TOML.md) for the schema and workflow.
+
 A recurring failure mode is querying with generic or invented traits (`auth`,
 `internal-service`, or `kubernetes` as a *context*) that miss the published
 vocabulary, so a relevant kit scores poorly and the agent wrongly concludes

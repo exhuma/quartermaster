@@ -73,6 +73,7 @@ from app.kits import (
     list_catalog_v2,
     read_kit,
     read_kit_outline,
+    resolve_effective_version,
     select_kits_v2,
 )
 from app.kits import (
@@ -535,6 +536,8 @@ async def _resolve_once(
     broaden: bool,
     limit: int,
     max_sections_per_kit: int,
+    pins: dict[str, str] | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """
     Run one resolution: sampling inference (if available) + sync assembly.
@@ -559,6 +562,8 @@ async def _resolve_once(
         max_sections_per_kit=max_sections_per_kit,
         pre_inferred=pre_inferred,
         section_ranker=section_ranker,
+        pins=pins,
+        project_id=project_id,
     )
 
 
@@ -687,6 +692,8 @@ async def resolve_kits(
     limit: int = 8,
     max_sections_per_kit: int = 8,
     include_diagnostics: bool = False,
+    pins: dict[str, str] | None = None,
+    project_id: str | None = None,
     ctx: Context | None = None,
 ) -> dict:
     """
@@ -721,6 +728,14 @@ async def resolve_kits(
         (inference engine, trait provenance, per-kit scores, coverage, whether
         a clarification round ran) plus a directive asking the agent to report
         Quartermaster's impact after the task. Off by default.
+    :param pins: Per-kit major-version pins read from the repo's
+        ``.quartermaster.toml`` (``{"module-auth-oidc": "v2"}``). A pinned kit
+        is inlined at that major; an unpinned kit that has shipped a breaking
+        change is inlined at its earliest major with a ``version_advisory`` —
+        surface it, and on the user's decision write the pin back to
+        ``.quartermaster.toml`` (the server never writes it).
+    :param project_id: Optional stable repo label from ``.quartermaster.toml``,
+        recorded with adoption telemetry only.
     :returns: ``{engine, inferred_traits, confidence, coverage,
         broadening_recommended, kits, warnings}``; each kit carries
         ``sections``, ``always_load_markdown`` and ``fetch_on_demand``. When
@@ -762,6 +777,8 @@ async def resolve_kits(
         broaden=broaden,
         limit=limit,
         max_sections_per_kit=max_sections_per_kit,
+        pins=pins,
+        project_id=project_id,
     )
 
     # One clarification round on a weak match: ask for detail, then re-resolve
@@ -778,6 +795,8 @@ async def resolve_kits(
                 broaden=broaden,
                 limit=limit,
                 max_sections_per_kit=max_sections_per_kit,
+                pins=pins,
+                project_id=project_id,
             )
 
     if include_diagnostics:
@@ -822,7 +841,11 @@ def explain_kit_candidate(
 
 
 @mcp.tool
-def get_kit_outline(name: str, version: str | None = None) -> dict:
+def get_kit_outline(
+    name: str,
+    version: str | None = None,
+    pin: str | None = None,
+) -> dict:
     """
     Return a cheap section map for a kit before loading its content.
 
@@ -831,20 +854,35 @@ def get_kit_outline(name: str, version: str | None = None) -> dict:
     current step needs. Sections flagged ``always_load`` hold the kit's
     core invariants and should usually be loaded first.
 
+    When the repo pins this kit in ``.quartermaster.toml``, pass that
+    major as *pin* so the outline describes the version the repo follows.
+    When a kit has more than one major and the caller neither pins nor
+    sets *version*, the **earliest** major is described and a
+    ``version_advisory`` is attached listing the newer version's breaking
+    changes — surface it to the user and, on their decision, write the pin
+    back to ``.quartermaster.toml`` (the server never writes it).
+
     :param name: Kit name, e.g. ``module-database-postgresql``.
-    :param version: Major version string, e.g. ``"v1"``.  When omitted
-        the latest available version is used.
+    :param version: Explicit major version override, e.g. ``"v1"``.
+    :param pin: The repo-side pin from ``.quartermaster.toml``, if any.
     :returns: ``{name, version, summary, sections}`` where each section
-        is ``{id, title, gloss, always_load, bytes}``.
+        is ``{id, title, gloss, always_load, bytes}``; plus
+        ``version_advisory`` when a conservative default was applied.
     :raises ValueError: If *name* does not match any known kit, or if
         *version* is not available for that kit.
     """
     try:
-        return read_kit_outline(name, version)
+        served, advisory = resolve_effective_version(
+            name, version=version, pin=pin
+        )
+        outline = read_kit_outline(name, served)
     except KitNotFoundError as exc:
         raise ValueError(str(exc)) from exc
     except KitVersionNotFoundError as exc:
         raise ValueError(str(exc)) from exc
+    if advisory is not None:
+        outline["version_advisory"] = advisory
+    return outline
 
 
 @mcp.tool
@@ -852,6 +890,8 @@ def get_kit(
     name: str,
     version: str | None = None,
     sections: list[str] | None = None,
+    pin: str | None = None,
+    project_id: str | None = None,
 ) -> str:
     """
     Return instruction content for the named kit.
@@ -865,19 +905,32 @@ def get_kit(
     ``get_kit_outline`` first, then pass *sections* to pull just those
     sections. Omit *sections* to get the complete instructions.
 
+    Pass *pin* (the repo's major from ``.quartermaster.toml``) so a kit
+    that has shipped a breaking change keeps returning the version the
+    repo follows. Without a pin or explicit *version*, a multi-version
+    kit conservatively returns its **earliest** major; call
+    ``get_kit_outline`` first to see the ``version_advisory`` and prompt
+    the user before upgrading. This return value is plain Markdown, so
+    the advisory is only exposed via ``get_kit_outline``.
+
     :param name: Kit name, e.g. ``stack-fastapi-vuetify`` or
         ``module-auth-local``.
-    :param version: Major version string, e.g. ``"v1"``.  When
-        omitted the latest available version is returned.
+    :param version: Explicit major version override, e.g. ``"v1"``.
     :param sections: Optional section ids from ``get_kit_outline``.
         When omitted, the full instructions are returned.
+    :param pin: The repo-side pin from ``.quartermaster.toml``, if any.
+    :param project_id: Optional stable repo label from
+        ``.quartermaster.toml`` used only for adoption telemetry.
     :returns: UTF-8 Markdown for the requested sections (or the whole
         kit when *sections* is omitted).
     :raises ValueError: If *name* does not match any known kit, if
         *version* is not available, or if a section id is unknown.
     """
     try:
-        markdown = read_kit(name, version, sections)
+        served, _advisory = resolve_effective_version(
+            name, version=version, pin=pin
+        )
+        markdown = read_kit(name, served, sections)
     except KitNotFoundError as exc:
         raise ValueError(str(exc)) from exc
     except KitVersionNotFoundError as exc:
@@ -894,6 +947,14 @@ def get_kit(
     )
     local_store.record_delivery(
         kit=name, disposition=disposition, tokens=tokens
+    )
+    local_store.record_kit_version_use(
+        kit=name,
+        version=served,
+        pinned=pin is not None and _advisory is None,
+        advisory_shown=False,
+        subject=current_sub(),
+        project_id=project_id,
     )
     return markdown
 

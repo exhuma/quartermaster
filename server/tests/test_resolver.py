@@ -513,3 +513,82 @@ def test_memory_nudge_tolerates_settings_validation_error(
         resolver.resolve_kits(task="add a FastAPI REST endpoint")
     finally:
         reset_identity(tokens)
+
+
+# ---------------------------------------------------------------------------
+# Version pinning in the one-shot resolve pipeline
+# ---------------------------------------------------------------------------
+
+
+def _add_kit_alpha_v2(kit_root: Path) -> None:
+    """Promote the fixture's single-version kit-alpha to v1 + v2 + changelog."""
+    _write_kit_version(
+        kit_root,
+        "kit-alpha",
+        "v2",
+        summary="Alpha v2 summary.",
+        sections=[
+            {
+                "file": "invariant.md",
+                "title": "Architecture invariants",
+                "gloss": "Non-negotiables for FastAPI layering",
+                "always_load": True,
+                "body": "## Invariants\n\nKeep it layered (v2).\n",
+            },
+            {
+                "file": "endpoints.md",
+                "title": "REST endpoints",
+                "gloss": "How to add a REST API endpoint route",
+                "body": "## Endpoints\n\nAdd routers (v2).\n",
+            },
+        ],
+    )
+    (kit_root / "kit-alpha" / "CHANGELOG.md").write_text(
+        "# Changelog: kit-alpha\n\n"
+        "## v2.0.0 — Major refactor\n\n"
+        "- Replaced the authentication flow (breaking).\n\n"
+        "## v1.0.0 — Initial\n\n- Initial release.\n",
+        encoding="utf-8",
+    )
+
+
+def _alpha(out: dict) -> dict:
+    return next(k for k in out["kits"] if k["name"] == "kit-alpha")
+
+
+def test_unpinned_multi_version_serves_earliest_with_advisory(
+    kit_root: Path,
+) -> None:
+    _add_kit_alpha_v2(kit_root)
+    out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
+    alpha = _alpha(out)
+    assert alpha["version"] == "v1"
+    assert "v2" in alpha["always_load_markdown"] or "layered" in (
+        alpha["always_load_markdown"]
+    )
+    advisory = alpha["version_advisory"]
+    assert advisory["reason"] == "unpinned-multi-version"
+    assert advisory["latest_version"] == "v2"
+    assert [c["version"] for c in advisory["breaking_changes"]] == ["v2.0.0"]
+    assert advisory["user_facing_warning"] is True
+
+
+def test_pin_selects_that_version_without_advisory(kit_root: Path) -> None:
+    _add_kit_alpha_v2(kit_root)
+    out = resolver.resolve_kits(
+        task="add a FastAPI REST endpoint",
+        pins={"kit-alpha": "v2"},
+    )
+    alpha = _alpha(out)
+    assert alpha["version"] == "v2"
+    assert "version_advisory" not in alpha
+    # v2's always-load content is what gets inlined.
+    assert "v2" in alpha["always_load_markdown"]
+
+
+def test_single_version_kit_has_no_advisory(kit_root: Path) -> None:
+    # kit-alpha is single-version in the base fixture.
+    out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
+    alpha = _alpha(out)
+    assert alpha["version"] == "v1"
+    assert "version_advisory" not in alpha

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -85,7 +86,29 @@ CREATE TABLE IF NOT EXISTS catalog_snapshots (
     always_load_tokens INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, domain)
 );
+
+CREATE TABLE IF NOT EXISTS kit_version_uses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    subject TEXT,
+    project_id TEXT,
+    kit TEXT NOT NULL,
+    version TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    advisory_shown INTEGER NOT NULL DEFAULT 0,
+    resolve_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_kit_version_uses_ts
+    ON kit_version_uses (ts);
+CREATE INDEX IF NOT EXISTS ix_kit_version_uses_kit
+    ON kit_version_uses (kit, ts);
 """
+
+
+def _version_sort_key(v: str) -> tuple[int, str]:
+    """Sort ``v<N>`` labels numerically, unknown shapes last by label."""
+    m = re.fullmatch(r"v(\d+)", v or "")
+    return (int(m.group(1)), "") if m else (10**9, v or "")
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -112,9 +135,15 @@ class LocalMetricsStore:
     writes.
     """
 
-    def __init__(self, db_path: Path, retention_days: int) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        retention_days: int,
+        version_telemetry_enabled: bool = True,
+    ) -> None:
         self._path = Path(db_path)
         self._retention_seconds = max(1, int(retention_days)) * 86_400
+        self._version_telemetry_enabled = bool(version_telemetry_enabled)
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
         self._writes = 0
@@ -159,6 +188,7 @@ class LocalMetricsStore:
         delivered_tokens: int,
         offered_tokens: int,
         subject: str | None = None,
+        project_id: str | None = None,
         traits_json: str | None = None,
     ) -> None:
         """Record one ``resolve_kits`` call plus its per-kit deliveries.
@@ -169,6 +199,8 @@ class LocalMetricsStore:
         :param subject: The caller's stable IdP subject, when authenticated.
             ``None`` for unattributed/anonymous resolves. Feeds per-user
             memory derivation (see ``app.storage.user_memory``).
+        :param project_id: Optional stable repo label from the caller's
+            ``.quartermaster.toml`` (a telemetry grouping label only).
         :param traits_json: The four inferred trait lists, JSON-encoded, for
             per-user language/framework affinity derivation.
         """
@@ -181,8 +213,9 @@ class LocalMetricsStore:
                 cur = conn.execute(
                     "INSERT INTO resolve_events "
                     "(ts, engine, confidence, coverage, broadening, "
-                    " delivered_tokens, offered_tokens, subject, traits_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " delivered_tokens, offered_tokens, subject, project_id, "
+                    " traits_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         engine,
@@ -192,6 +225,7 @@ class LocalMetricsStore:
                         int(delivered_tokens),
                         int(offered_tokens),
                         subject,
+                        project_id,
                         traits_json,
                     ),
                 )
@@ -231,6 +265,63 @@ class LocalMetricsStore:
                 self._after_write_locked()
         except Exception:  # noqa: BLE001
             logger.debug("record_delivery failed", exc_info=True)
+
+    def record_kit_version_use(
+        self,
+        *,
+        kit: str,
+        version: str,
+        pinned: bool = False,
+        advisory_shown: bool = False,
+        subject: str | None = None,
+        project_id: str | None = None,
+        resolve_id: int | None = None,
+    ) -> None:
+        """Record which major version of a kit was served to a caller.
+
+        Kept in its own table (not ``deliveries``, which feeds per-user
+        memory and co-occurrence) so version/pin semantics stay isolated.
+        Feeds the per-kit version-adoption chart and operator telemetry.
+
+        :param kit: Kit name.
+        :param version: The major version actually served (``v<N>``).
+        :param pinned: Whether the served version came from a valid repo pin.
+        :param advisory_shown: Whether a ``version_advisory`` was attached
+            (i.e. a conservative default was applied).
+        :param subject: The caller's stable IdP subject, when authenticated.
+        :param project_id: Optional stable repo label (telemetry grouping).
+        :param resolve_id: The owning ``resolve_events`` id, when this use
+            came from a ``resolve_kits`` call; ``None`` for direct
+            ``get_kit`` pulls.
+        """
+        if not self._version_telemetry_enabled:
+            return
+        now = time.time()
+        try:
+            with self._lock:
+                conn = self._conn
+                if conn is None:
+                    return
+                conn.execute(
+                    "INSERT INTO kit_version_uses "
+                    "(ts, subject, project_id, kit, version, pinned, "
+                    " advisory_shown, resolve_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        now,
+                        subject,
+                        project_id,
+                        kit,
+                        version,
+                        1 if pinned else 0,
+                        1 if advisory_shown else 0,
+                        resolve_id,
+                    ),
+                )
+                conn.commit()
+                self._after_write_locked()
+        except Exception:  # noqa: BLE001 - telemetry must never break a resolve
+            logger.debug("record_kit_version_use failed", exc_info=True)
 
     def record_tool_call(
         self, *, tool: str, ok: bool, duration_ms: float
@@ -319,6 +410,9 @@ class LocalMetricsStore:
         conn.execute("DELETE FROM resolve_events WHERE ts < ?", (cutoff,))
         conn.execute("DELETE FROM deliveries WHERE ts < ?", (cutoff,))
         conn.execute("DELETE FROM tool_calls WHERE ts < ?", (cutoff,))
+        conn.execute(
+            "DELETE FROM kit_version_uses WHERE ts < ?", (cutoff,)
+        )
         day_cutoff = time.strftime(
             "%Y-%m-%d", time.gmtime(cutoff - 86_400)
         )
@@ -346,6 +440,10 @@ class LocalMetricsStore:
         if "traits_json" not in cols:
             conn.execute(
                 "ALTER TABLE resolve_events ADD COLUMN traits_json TEXT"
+            )
+        if "project_id" not in cols:
+            conn.execute(
+                "ALTER TABLE resolve_events ADD COLUMN project_id TEXT"
             )
         conn.commit()
 
@@ -448,6 +546,46 @@ class LocalMetricsStore:
             {"day": day, "delivered": v["delivered"], "offered": v["offered"]}
             for day, v in sorted(by_day.items())
         ]
+
+    def version_adoption(
+        self, kit: str, cutoff: float, granularity: str = "1d"
+    ) -> dict[str, Any]:
+        """Per-bucket count of which major versions of *kit* were served.
+
+        Powers the per-kit version-adoption chart on the kit detail page.
+        Reads ``kit_version_uses`` (never ``deliveries``). *granularity*
+        selects the bucket size (``1h``/``1d``); the ``day`` key is an
+        opaque, sorted bucket label.
+
+        :returns: ``{"granularity", "versions": [...], "buckets":
+            [{"day", "counts": {version: n}}]}`` with ``versions`` sorted
+            oldest → newest across the window.
+        """
+        fmt = _GRANULARITY_FORMATS.get(granularity, _GRANULARITY_FORMATS["1d"])
+        rows = self._query(
+            f"SELECT strftime('{fmt}', ts, 'unixepoch') AS day, "
+            "version, COUNT(*) AS uses "
+            "FROM kit_version_uses WHERE kit = ? AND ts >= ? "
+            "GROUP BY day, version ORDER BY day ASC",
+            (kit, cutoff),
+        )
+        by_day: dict[str, dict[str, int]] = {}
+        versions: set[str] = set()
+        for r in rows:
+            versions.add(r["version"])
+            by_day.setdefault(r["day"], {})[r["version"]] = r["uses"]
+        ordered_versions = sorted(
+            versions, key=lambda v: _version_sort_key(v)
+        )
+        buckets = [
+            {"day": day, "counts": by_day[day]}
+            for day in sorted(by_day)
+        ]
+        return {
+            "granularity": granularity,
+            "versions": ordered_versions,
+            "buckets": buckets,
+        }
 
     def resolve_health(self, cutoff: float) -> dict[str, Any]:
         """Engine/confidence mix, coverage percentiles, broadening rate."""
@@ -793,6 +931,9 @@ def init(settings: Any) -> LocalMetricsStore | None:
                 retention_days=getattr(
                     settings, "metrics_local_retention_days", 7
                 ),
+                version_telemetry_enabled=getattr(
+                    settings, "version_telemetry_enabled", True
+                ),
             )
             store.init()
             _store = store
@@ -836,6 +977,13 @@ def record_delivery(**kwargs: Any) -> None:
     store = _store
     if store is not None:
         store.record_delivery(**kwargs)
+
+
+def record_kit_version_use(**kwargs: Any) -> None:
+    """Best-effort tap: forward a kit version-use event to the store."""
+    store = _store
+    if store is not None:
+        store.record_kit_version_use(**kwargs)
 
 
 def record_tool_call(**kwargs: Any) -> None:

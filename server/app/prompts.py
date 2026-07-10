@@ -104,6 +104,16 @@ _PROMPTS: list[dict[str, str]] = [
         ),
         "template_file": "maintain-skills.md",
     },
+    {
+        "name": "quartermaster_pin_file",
+        "title": "Quartermaster Version-Pin File",
+        "intent": (
+            "The canonical `.quartermaster.toml` schema plus the read/pass/"
+            "write workflow for remembering which major version of a kit a "
+            "repo follows across breaking changes."
+        ),
+        "template_file": "quartermaster-toml.md",
+    },
 ]
 
 
