@@ -27,6 +27,7 @@ from app.kits import (
     _parse_version_tuple,
     _version_key,
     compare_kit_versions,
+    resolve_effective_version,
     explain_kit_v2,
     list_all_kits,
     list_available_traits_v2,
@@ -902,3 +903,108 @@ def test_real_kit_sections_are_retrievable(real_kits: Path) -> None:
     full = read_kit("module-database-postgresql")
     assert "Architecture invariants" in subset
     assert len(subset) < len(full)
+
+
+# ---------------------------------------------------------------------------
+# resolve_effective_version + version advisories
+# ---------------------------------------------------------------------------
+
+
+def _use_root(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": root})(),
+    )
+
+
+def test_effective_version_single_version_no_advisory(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    served, advisory = resolve_effective_version("kit-beta")
+    assert served == "v1"
+    assert advisory is None
+
+
+def test_effective_version_unpinned_multi_serves_earliest_with_advisory(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    served, advisory = resolve_effective_version("kit-alpha")
+    assert served == "v1"
+    assert advisory is not None
+    assert advisory["reason"] == "unpinned-multi-version"
+    assert advisory["served_version"] == "v1"
+    assert advisory["latest_version"] == "v2"
+    assert advisory["available_versions"] == ["v1", "v2"]
+    assert advisory["pin_file_hint"]["key"] == "kit-alpha"
+    # kit-alpha has no CHANGELOG in the fixture: degrade to an empty list.
+    assert advisory["breaking_changes"] == []
+    assert advisory["user_facing_warning"] is False
+
+
+def test_effective_version_valid_pin_no_advisory(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    served, advisory = resolve_effective_version("kit-alpha", pin="v2")
+    assert served == "v2"
+    assert advisory is None
+
+
+def test_effective_version_invalid_pin_falls_back_with_advisory(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    served, advisory = resolve_effective_version("kit-alpha", pin="v9")
+    assert served == "v1"
+    assert advisory is not None
+    assert advisory["reason"] == "pin-invalid"
+
+
+def test_effective_version_explicit_version_wins(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    served, advisory = resolve_effective_version("kit-alpha", version="v1")
+    assert served == "v1"
+    assert advisory is None
+
+
+def test_effective_version_explicit_unknown_version_raises(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    with pytest.raises(KitVersionNotFoundError):
+        resolve_effective_version("kit-alpha", version="v9")
+
+
+def test_effective_version_unknown_kit_raises(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_root(monkeypatch, kit_root)
+    with pytest.raises(KitNotFoundError):
+        resolve_effective_version("does-not-exist")
+
+
+def test_advisory_populates_breaking_changes_from_changelog(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Add a CHANGELOG so the advisory carries the v2 breaking summary, and only
+    # the entries whose *major* is above the served major (excludes v1.x).
+    (kit_root / "kit-alpha" / "CHANGELOG.md").write_text(
+        "# Changelog: kit-alpha\n\n"
+        "## v2.0.0 — Major refactor\n\n"
+        "- Replaced the authentication flow (breaking).\n\n"
+        "## v1.1.0 — Minor\n\n"
+        "- Fixed a typo.\n\n"
+        "## v1.0.0 — Initial\n\n"
+        "- Initial release.\n",
+        encoding="utf-8",
+    )
+    _use_root(monkeypatch, kit_root)
+    _served, advisory = resolve_effective_version("kit-alpha")
+    assert advisory is not None
+    versions = [c["version"] for c in advisory["breaking_changes"]]
+    assert versions == ["v2.0.0"]
+    assert advisory["user_facing_warning"] is True

@@ -170,3 +170,57 @@ describe('catalogGrowthOption', () => {
     expect((opt.xAxis as any).max).toBe(ms2)
   })
 })
+
+import { versionAdoptionOption } from '@/views/metricsCharts'
+import type { KitVersionAdoption } from '@/types/metrics'
+
+describe('versionAdoptionOption', () => {
+  const colors = {
+    primary: '#1',
+    info: '#2',
+    success: '#3',
+    warning: '#4',
+    secondary: '#5',
+    error: '#6',
+  }
+
+  const adoption: KitVersionAdoption = {
+    meta: {
+      kit: 'kit-alpha',
+      window: '30d',
+      granularity: '1d',
+      generated_at: 0,
+      retention_days: 7,
+      store_enabled: true,
+      available_versions: ['v1', 'v2'],
+    },
+    granularity: '1d',
+    versions: ['v1', 'v2'],
+    buckets: [
+      { day: '2026-01-01', counts: { v1: 3, v2: 0 } },
+      { day: '2026-01-02', counts: { v1: 1, v2: 2 } },
+    ],
+  }
+
+  it('builds one stacked area series per version', () => {
+    const opt = versionAdoptionOption(adoption, colors, '1d')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const series = opt.series as any[]
+    expect(series.map((s) => s.name)).toEqual(['v1', 'v2'])
+    expect(series.every((s) => s.stack === 'uses')).toBe(true)
+    expect(series.every((s) => s.areaStyle)).toBeTruthy()
+    // v2 counts across the two buckets (missing → 0).
+    expect(series[1].data.map((d: [number, number]) => d[1])).toEqual([0, 2])
+  })
+
+  it('renders empty (no series) when there is no data', () => {
+    const empty: KitVersionAdoption = {
+      ...adoption,
+      versions: [],
+      buckets: [],
+    }
+    const opt = versionAdoptionOption(empty, colors, '1d')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((opt.series as any[]).length).toBe(0)
+  })
+})

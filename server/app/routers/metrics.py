@@ -19,9 +19,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import telemetry
+from app.kits import list_all_kits
 from app.media_types import VendorJSONResponse, require_vendor_accept
 from app.observability import local_store
 
@@ -133,3 +134,64 @@ def metrics_overview(
     if granularity not in local_store._GRANULARITY_FORMATS:
         granularity = local_store.DEFAULT_GRANULARITY
     return build_overview(window, granularity)
+
+
+@router.get("/kits/{name}/version-adoption")
+def kit_version_adoption(
+    name: str,
+    window: str = Query(
+        default=local_store.DEFAULT_WINDOW,
+        description="Time window: 24h, 7d, or 30d (capped to retention).",
+    ),
+    granularity: str = Query(
+        default=local_store.DEFAULT_GRANULARITY,
+        description="Time-series bucket size: 1h or 1d.",
+    ),
+) -> dict[str, Any]:
+    """Return per-bucket version-adoption for one kit.
+
+    Powers the per-kit chart on the kit detail page. Reads the isolated
+    ``kit_version_uses`` telemetry, so it only reflects usage recorded
+    since version pinning shipped (empty until data accrues).
+    """
+    known = {k.name: k for k in list_all_kits()}
+    if name not in known:
+        raise HTTPException(
+            status_code=404, detail=f"Kit not found: {name!r}"
+        )
+    available = known[name].versions
+
+    if window not in local_store._WINDOWS:
+        window = local_store.DEFAULT_WINDOW
+    if granularity not in local_store._GRANULARITY_FORMATS:
+        granularity = local_store.DEFAULT_GRANULARITY
+
+    window_seconds = local_store._WINDOWS[window]
+    retention = local_store.retention_days()
+    if retention:
+        window_seconds = min(window_seconds, retention * 86_400)
+    now = time.time()
+    cutoff = now - window_seconds
+
+    store = local_store.get_store()
+    if store is not None:
+        adoption = store.version_adoption(name, cutoff, granularity)
+    else:
+        adoption = {
+            "granularity": granularity,
+            "versions": [],
+            "buckets": [],
+        }
+
+    return {
+        "meta": {
+            "kit": name,
+            "window": window,
+            "granularity": granularity,
+            "generated_at": now,
+            "retention_days": retention,
+            "store_enabled": store is not None,
+            "available_versions": available,
+        },
+        **adoption,
+    }

@@ -22,7 +22,17 @@ def test_list_canned_prompts_has_expected_entries() -> None:
         "bootstrap_project_skills",
         "audit_project_skills",
         "maintain_project_skills",
+        "quartermaster_pin_file",
     }
+
+
+def test_pin_file_prompt_documents_schema_and_workflow() -> None:
+    body = get_canned_prompt("quartermaster_pin_file")["prompt_template"]
+    assert ".quartermaster.toml" in body
+    assert "[kits]" in body
+    assert "version_advisory" in body
+    # The server never writes the repo file; the agent does.
+    assert "never writes" in body.lower()
 
 
 def test_prompt_bodies_load_from_bundled_markdown() -> None:

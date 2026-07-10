@@ -366,3 +366,116 @@ def test_resolve_history_for_subject_empty_for_unknown_subject(
     store: ls.LocalMetricsStore,
 ) -> None:
     assert store.resolve_history_for_subject("nobody", 0.0) == []
+
+
+# ---------------------------------------------------------------------------
+# kit_version_uses: version-adoption telemetry
+# ---------------------------------------------------------------------------
+
+
+def test_record_kit_version_use_and_adoption_series(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_kit_version_use(
+        kit="kit-alpha", version="v1", pinned=False, advisory_shown=True,
+        subject="alice", project_id="qm_1",
+    )
+    store.record_kit_version_use(
+        kit="kit-alpha", version="v1", pinned=True, subject="bob",
+    )
+    store.record_kit_version_use(
+        kit="kit-alpha", version="v2", pinned=True, project_id="qm_1",
+    )
+    # A different kit must not leak into kit-alpha's series.
+    store.record_kit_version_use(kit="kit-beta", version="v1")
+
+    adoption = store.version_adoption("kit-alpha", 0.0, "1d")
+    assert adoption["versions"] == ["v1", "v2"]
+    assert len(adoption["buckets"]) == 1
+    counts = adoption["buckets"][0]["counts"]
+    assert counts == {"v1": 2, "v2": 1}
+
+
+def test_version_adoption_empty_for_unknown_kit(
+    store: ls.LocalMetricsStore,
+) -> None:
+    adoption = store.version_adoption("nope", 0.0, "1d")
+    assert adoption["versions"] == []
+    assert adoption["buckets"] == []
+
+
+def test_version_telemetry_gate_disables_recording(tmp_path: Path) -> None:
+    s = ls.LocalMetricsStore(
+        tmp_path / "m.db", retention_days=7, version_telemetry_enabled=False
+    )
+    s.init()
+    s.record_kit_version_use(kit="kit-alpha", version="v1")
+    assert s.version_adoption("kit-alpha", 0.0, "1d")["buckets"] == []
+
+
+def test_init_migrates_pre_existing_db_adds_project_id_and_uses_table(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+    import time as _time
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE resolve_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            engine TEXT,
+            confidence TEXT,
+            coverage REAL,
+            broadening INTEGER NOT NULL DEFAULT 0,
+            delivered_tokens INTEGER NOT NULL DEFAULT 0,
+            offered_tokens INTEGER NOT NULL DEFAULT 0,
+            subject TEXT,
+            traits_json TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO resolve_events "
+        "(ts, engine, confidence, coverage, broadening, delivered_tokens, "
+        " offered_tokens) VALUES (?, 'lexical', 'high', 0.5, 0, 10, 5)",
+        (_time.time(),),
+    )
+    conn.commit()
+    conn.close()
+
+    s = ls.LocalMetricsStore(db_path, retention_days=7)
+    s.init()
+
+    cols = {
+        r["name"]
+        for r in s._conn.execute("PRAGMA table_info(resolve_events)")
+    }
+    assert "project_id" in cols
+    # Old row reads back NULL for the new column, data preserved.
+    row = s._conn.execute(
+        "SELECT project_id, engine FROM resolve_events"
+    ).fetchone()
+    assert row["project_id"] is None
+    assert row["engine"] == "lexical"
+    # The new table is usable end-to-end.
+    s.record_kit_version_use(kit="k", version="v1", project_id="qm_x")
+    assert s.version_adoption("k", 0.0, "1d")["buckets"][0]["counts"] == {
+        "v1": 1
+    }
+
+
+def test_record_resolve_persists_project_id(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_resolve(
+        engine="lexical", confidence="high", coverage=0.9, broadening=False,
+        deliveries=[], delivered_tokens=0, offered_tokens=0,
+        subject="alice", project_id="qm_proj",
+    )
+    row = store._conn.execute(
+        "SELECT project_id FROM resolve_events"
+    ).fetchone()
+    assert row["project_id"] == "qm_proj"

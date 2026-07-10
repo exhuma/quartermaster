@@ -1615,3 +1615,239 @@ def compare_kit_versions(
         ],
         "user_facing_warning": user_facing,
     }
+
+
+# ---------------------------------------------------------------------------
+# Version pinning: effective-version resolution and upgrade advisories
+# ---------------------------------------------------------------------------
+#
+# A target repo records which *major* version of a kit it follows in a
+# repo-side ``.quartermaster.toml`` file (see the project docs). The server
+# never stores or writes that pin; the calling agent reads the file and passes
+# the pin in. The three agent-facing tools (``get_kit``, ``get_kit_outline``,
+# ``resolve_kits``) resolve an *effective* version conservatively: an explicit
+# version or a valid pin wins; otherwise, when a kit has more than one major,
+# the earliest major is served and an upgrade *advisory* is attached so the
+# agent can prompt the user to confirm or upgrade (and then write the pin).
+# Single-version kits are unaffected — no pin, no advisory.
+
+
+def _available_versions(name: str, subject: Any = _CTX_SUBJECT) -> list[str]:
+    """
+    Return the available major versions for a kit, oldest → newest.
+
+    :param name: Kit name as returned by :func:`list_all_kits`.
+    :param subject: Caller identity for private-kit visibility.
+    :returns: Sorted list of ``v<N>`` labels.
+    :raises KitNotFoundError: If no kit with *name* exists.
+    """
+    layers = _caller_layers(subject)
+    layered = _kit_version_paths_layered(layers)
+    if name not in layered:
+        raise KitNotFoundError(name)
+    return sorted(layered[name].keys(), key=_version_key)
+
+
+def _read_changelog_sections(
+    name: str, subject: Any = _CTX_SUBJECT
+) -> dict[str, str]:
+    """
+    Return the parsed ``CHANGELOG.md`` sections for a kit, or ``{}``.
+
+    Unlike :func:`compare_kit_versions`, this never raises when the kit
+    has no changelog — an advisory must degrade gracefully rather than
+    fail a resolve.
+
+    :param name: Kit name.
+    :param subject: Caller identity for layer resolution.
+    :returns: Mapping of version label → section body (empty if absent).
+    """
+    for layer in reversed(_caller_layers(subject)):
+        changelog_path = layer.path / name / "CHANGELOG.md"
+        if changelog_path.exists():
+            return _parse_changelog(
+                changelog_path.read_text(encoding="utf-8")
+            )
+    return {}
+
+
+def _empty_version_policy() -> dict[str, Any]:
+    """Return the default (no-constraint) advisory ``policy`` block."""
+    return {"min_version": None, "deprecated": []}
+
+
+def _version_policy_for(name: str) -> dict[str, Any]:
+    """
+    Return the operator version policy for *name*, or the empty policy.
+
+    Settings access is tolerant of an unconfigured/invalid environment
+    (mirrors the resolver's engine-config handling) — any failure yields
+    no policy rather than breaking a resolve.
+    """
+    try:
+        pol = get_settings().version_policy().get(name)
+    except Exception:  # noqa: BLE001 - policy is advisory, never fatal
+        return _empty_version_policy()
+    if not pol:
+        return _empty_version_policy()
+    return {
+        "min_version": pol.get("min_version"),
+        "deprecated": list(pol.get("deprecated", [])),
+    }
+
+
+def _conservative_default_enabled() -> bool:
+    """Whether unpinned multi-version kits serve their earliest major."""
+    try:
+        return bool(get_settings().conservative_default_enabled)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _build_version_advisory(
+    name: str,
+    served: str,
+    latest: str,
+    versions: list[str],
+    *,
+    reason: str,
+    policy: dict[str, Any] | None = None,
+    subject: Any = _CTX_SUBJECT,
+) -> dict[str, Any]:
+    """
+    Build the ``version_advisory`` block for a served-below-latest kit.
+
+    Reuses the changelog machinery (:func:`_parse_changelog`,
+    :data:`_USER_FACING_RE`) to summarise the breaking changes a caller
+    would take on by upgrading from *served* to *latest*. Only changelog
+    entries whose **major** version is greater than *served*'s and up to
+    and including *latest*'s are included, so a v1→v2 advisory surfaces
+    the v2 breaking changes without repeating minor v1.x history.
+
+    :param name: Kit name.
+    :param served: The version actually being served (conservative pick).
+    :param latest: The highest available version.
+    :param versions: All available versions, oldest → newest.
+    :param reason: Why the advisory fired (``unpinned-multi-version``,
+        ``pin-invalid``, or ``policy-min-version``).
+    :param policy: Optional operator policy block; defaults to empty.
+    :param subject: Caller identity for changelog resolution.
+    :returns: The ``version_advisory`` dict.
+    """
+    served_major = _version_key(served)
+    latest_major = _version_key(latest)
+    breaking_changes: list[dict[str, str]] = []
+    user_facing = False
+    if served_major < latest_major:
+        sections = _read_changelog_sections(name, subject)
+        selected = {
+            v: body
+            for v, body in sections.items()
+            if served_major < _parse_version_tuple(v)[0] <= latest_major
+        }
+        ordered = sorted(
+            selected.items(), key=lambda kv: _parse_version_tuple(kv[0])
+        )
+        breaking_changes = [
+            {"version": v, "summary": body} for v, body in ordered
+        ]
+        user_facing = any(
+            bool(_USER_FACING_RE.search(body)) for _v, body in ordered
+        )
+    return {
+        "kit": name,
+        "served_version": served,
+        "latest_version": latest,
+        "available_versions": versions,
+        "reason": reason,
+        "breaking_changes": breaking_changes,
+        "user_facing_warning": user_facing,
+        "policy": policy or _empty_version_policy(),
+        "action_required": "confirm_and_pin",
+        "pin_file_hint": {
+            "path": ".quartermaster.toml",
+            "table": "kits",
+            "key": name,
+        },
+    }
+
+
+def resolve_effective_version(
+    name: str,
+    *,
+    version: str | None = None,
+    pin: str | None = None,
+    subject: Any = _CTX_SUBJECT,
+) -> tuple[str, dict[str, Any] | None]:
+    """
+    Resolve the version a caller should be served, plus any advisory.
+
+    Decision order:
+
+    * an explicit *version* (validated) always wins, no advisory;
+    * a valid *pin* wins, no advisory;
+    * an *invalid* pin (a rolled-back or removed version) falls back to
+      the conservative default with a ``pin-invalid`` advisory — it
+      never raises, so a stale pin cannot brick a resolve;
+    * with no version or pin and a single available version, that
+      version is served with no advisory;
+    * with no version or pin and multiple versions, the **earliest**
+      major is served (an unpinned repo predates the split) with an
+      ``unpinned-multi-version`` advisory.
+
+    This deliberately does not touch :func:`_resolve_kit_version`'s
+    latest-wins default; only the agent-facing tools call this helper and
+    pass the resolved version down explicitly.
+
+    :param name: Kit name.
+    :param version: Explicit version override, if any.
+    :param pin: The repo-side pin the agent read, if any.
+    :param subject: Caller identity for version/changelog resolution.
+    :returns: ``(served_version, advisory_or_None)``.
+    :raises KitNotFoundError: If no kit with *name* exists.
+    :raises KitVersionNotFoundError: If an explicit *version* is unknown.
+    """
+    versions = _available_versions(name, subject)
+    latest = max(versions, key=_version_key)
+    earliest = min(versions, key=_version_key)
+
+    # An explicit version or a valid pin is authoritative — no advisory.
+    if version is not None:
+        if version not in versions:
+            raise KitVersionNotFoundError(name, version)
+        return version, None
+    if pin is not None and pin in versions:
+        return pin, None
+
+    pin_invalid = pin is not None  # present but not among available versions
+    if len(versions) == 1 and not pin_invalid:
+        return versions[0], None
+
+    # Conservative default: serve the earliest major (an unpinned repo predates
+    # the split) unless the operator reverted to latest-wins.
+    served = earliest if _conservative_default_enabled() else latest
+    reason = "pin-invalid" if pin_invalid else "unpinned-multi-version"
+
+    # Operator policy floor: never serve below a declared minimum major.
+    policy = _version_policy_for(name)
+    min_version = policy.get("min_version")
+    if (
+        min_version in versions
+        and _version_key(served) < _version_key(min_version)
+    ):
+        served = min_version
+        reason = "policy-min-version"
+
+    # Nothing to advise when latest is served for a non-pin, non-policy reason.
+    if (
+        served == latest
+        and not pin_invalid
+        and reason != "policy-min-version"
+    ):
+        return served, None
+
+    advisory = _build_version_advisory(
+        name, served, latest, versions,
+        reason=reason, policy=policy, subject=subject,
+    )
+    return served, advisory

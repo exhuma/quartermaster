@@ -71,3 +71,18 @@ or you are loading several kits incrementally.
 
 For a compact, operational version of this trait-selection routine, fetch the
 bootstrap prompt from the prompt registry (`list_prompts` → `get_prompt`).
+
+**Version pinning — remember which kit major a repo follows.** When a kit ships
+a breaking change it gains a new major (`v2`), and both versions coexist. So a
+repo keeps applying consistent conventions, record its per-kit major in a
+repo-side `.quartermaster.toml` file (the server is stateless about this and
+never writes to your repo — you do, with your own file tools). At task start,
+read that file and pass what you find: `resolve_kits(task="…", pins={…},
+project_id="…")`, or `get_kit_outline(name, pin="…")` / `get_kit(name,
+pin="…")`. When a kit has multiple majors and you pass no pin, the server
+serves the **earliest** major and attaches a `version_advisory` describing the
+newer version's breaking changes — surface it, ask the user whether to stay or
+upgrade, then write the chosen major back to `.quartermaster.toml`. A pin only
+constrains a kit's *version*, never which kits are selected, so it stays
+compatible with per-task `resolve_kits`. Fetch the `quartermaster_pin_file`
+prompt (`list_prompts` → `get_prompt`) for the canonical schema and workflow.

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useTheme } from 'vuetify'
 
 import { useKitEditor } from '@/composables/useKitEditor'
+import { useKitMetrics } from '@/composables/useKitMetrics'
 import { useMe } from '@/composables/useMe'
+import BaseChart from '@/components/BaseChart.vue'
+import ChartCard from '@/components/ChartCard.vue'
 import FieldHelp from '@/components/FieldHelp.vue'
 import { applicabilityHelp } from '@/constants/fieldHelp'
+import { versionAdoptionOption } from '@/views/metricsCharts'
 import type {
   Applicability,
   KitDetail,
@@ -16,6 +21,11 @@ const props = defineProps<{ name: string }>()
 
 const editor = useKitEditor()
 const { isEditor, fetchMe } = useMe()
+const { adoption, fetchAdoption } = useKitMetrics()
+const theme = useTheme()
+const colors = computed(
+  () => theme.current.value.colors as unknown as Record<string, string>
+)
 
 const detail = ref<KitDetail | null>(null)
 const manifest = reactive<Applicability>(emptyManifest())
@@ -35,6 +45,32 @@ const traitCategories: (keyof TraitMap)[] = [
 ]
 
 const versions = computed(() => detail.value?.versions ?? [])
+// The adoption chart is only meaningful once a kit has shipped a breaking
+// change (more than one major); single-version kits never render it.
+const isMultiVersion = computed(() => versions.value.length > 1)
+const adoptionOption = computed(() =>
+  versionAdoptionOption(
+    adoption.value ?? {
+      meta: {
+        kit: props.name,
+        window: '30d',
+        granularity: '1d',
+        generated_at: 0,
+        retention_days: 0,
+        store_enabled: false,
+        available_versions: [],
+      },
+      granularity: '1d',
+      versions: [],
+      buckets: [],
+    },
+    colors.value,
+    '1d'
+  )
+)
+const adoptionEmpty = computed(
+  () => (adoption.value?.buckets.length ?? 0) === 0
+)
 
 function emptyTraitMap(): TraitMap {
   return { languages: [], frameworks: [], capabilities: [], contexts: [] }
@@ -64,6 +100,9 @@ onMounted(async () => {
   changelog.value = (await editor.getChangelog(props.name)).changelog
   compareFrom.value = versions.value[0] ?? ''
   compareTo.value = versions.value[versions.value.length - 1] ?? ''
+  if (isMultiVersion.value) {
+    await fetchAdoption(props.name)
+  }
 })
 
 async function saveManifest(): Promise<void> {
@@ -319,6 +358,17 @@ async function runCompare(): Promise<void> {
         </v-card>
       </v-col>
     </v-row>
+
+    <ChartCard
+      v-if="isMultiVersion"
+      title="Version adoption over time"
+      what-it-shows="How many times each major version of this kit was served to callers, per day."
+      how-to-read="Each band is a major version. A rising newer band with a shrinking older one means repos are migrating; a persistent older band means repos are still pinned to it."
+      :empty="adoptionEmpty"
+      empty-text="No adoption data yet — it accrues as agents resolve or fetch this kit."
+    >
+      <BaseChart :option="adoptionOption" :height="320" />
+    </ChartCard>
 
     <v-card title="Changelog" class="mt-4">
       <v-card-text>

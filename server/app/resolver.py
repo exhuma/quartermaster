@@ -28,7 +28,7 @@ from app import telemetry
 from app.config import get_settings
 from app.gap import detect_gap
 from app.identity import current_sub
-from app.kits import read_kit, select_kits_v2
+from app.kits import read_kit, resolve_effective_version, select_kits_v2
 from app.notifications import gap_tools_enabled
 from app.observability import local_store
 from app.personalization import apply_memory_nudge
@@ -367,6 +367,8 @@ def resolve_kits(
     max_sections_per_kit: int = 8,
     pre_inferred: InferredTraits | None = None,
     section_ranker: TraitEngine | None = None,
+    pins: dict[str, str] | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Resolve a natural-language task to recommended kits and content.
@@ -382,9 +384,16 @@ def resolve_kits(
     :param section_ranker: Section ranker to use with *pre_inferred*. Defaults
         to :func:`build_ranker` (embedding engine or lexical floor). Ignored
         when *pre_inferred* is ``None``.
+    :param pins: Per-kit major-version pins the agent read from the repo's
+        ``.quartermaster.toml``. A pinned kit is inlined at its pinned major;
+        an unpinned multi-version kit is inlined at its earliest major with a
+        ``version_advisory`` attached.
+    :param project_id: Optional stable repo label from ``.quartermaster.toml``,
+        recorded with adoption telemetry only.
     :returns: The hybrid response described in this module's docstring.
     :raises ValueError: If *task* is empty.
     """
+    pins = pins or {}
     task = (task or "").strip()
     if not task:
         raise ValueError("task must not be empty")
@@ -447,8 +456,13 @@ def resolve_kits(
     with telemetry.span("resolve.assemble") as assemble_span:
         for candidate in selection["candidates"]:
             name = candidate["name"]
-            refs = build_section_refs([name])
-            version = refs[0].version if refs else candidate["latest_version"]
+            # Serve the pinned major (or the conservative default for an
+            # unpinned multi-version kit) and describe/rank that version's
+            # sections, not the latest.
+            version, advisory = resolve_effective_version(
+                name, pin=pins.get(name)
+            )
+            refs = build_section_refs([name], version)
             always = [r for r in refs if r.always_load]
             rest = [r for r in refs if not r.always_load]
 
@@ -498,18 +512,28 @@ def resolve_kits(
                 )
                 local_deliveries.append((name, "offered", offered_tokens))
 
-            kits_out.append(
-                {
-                    "name": name,
-                    "version": version,
-                    "score": candidate["score"],
-                    "confidence": candidate["confidence"],
-                    "reasons": candidate["reasons"],
-                    "summary": candidate["summary"],
-                    "sections": descriptors,
-                    "always_load_markdown": markdown,
-                    "fetch_on_demand": offered_ids,
-                }
+            kit_out = {
+                "name": name,
+                "version": version,
+                "score": candidate["score"],
+                "confidence": candidate["confidence"],
+                "reasons": candidate["reasons"],
+                "summary": candidate["summary"],
+                "sections": descriptors,
+                "always_load_markdown": markdown,
+                "fetch_on_demand": offered_ids,
+            }
+            if advisory is not None:
+                kit_out["version_advisory"] = advisory
+            kits_out.append(kit_out)
+
+            local_store.record_kit_version_use(
+                kit=name,
+                version=version,
+                pinned=name in pins and advisory is None,
+                advisory_shown=advisory is not None,
+                subject=current_sub(),
+                project_id=project_id,
             )
         telemetry.set_attrs(
             assemble_span,
@@ -548,6 +572,7 @@ def resolve_kits(
         delivered_tokens=total_delivered,
         offered_tokens=total_offered,
         subject=current_sub(),
+        project_id=project_id,
         traits_json=json.dumps(
             {
                 "languages": inferred.languages,

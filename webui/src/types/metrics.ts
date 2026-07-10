@@ -87,3 +87,27 @@ export interface MetricsOverview {
   structural_overlap: Heatmap
   catalog_growth: CatalogGrowth
 }
+
+// Per-kit version-adoption payload (GET /api/kits/{name}/version-adoption).
+// Mirrors app/routers/metrics.py::kit_version_adoption. Each bucket maps a UTC
+// time label to per-version served counts; `versions` is the union across the
+// window, oldest → newest.
+export interface VersionAdoptionBucket {
+  day: string
+  counts: Record<string, number>
+}
+
+export interface KitVersionAdoption {
+  meta: {
+    kit: string
+    window: MetricsWindow
+    granularity: MetricsGranularity
+    generated_at: number
+    retention_days: number
+    store_enabled: boolean
+    available_versions: string[]
+  }
+  granularity: MetricsGranularity
+  versions: string[]
+  buckets: VersionAdoptionBucket[]
+}

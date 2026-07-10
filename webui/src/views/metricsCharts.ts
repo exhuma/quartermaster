@@ -8,6 +8,7 @@ import type {
   CatalogGrowth,
   Heatmap,
   KitUsage,
+  KitVersionAdoption,
   MetricsGranularity,
   TokenPoint,
   ToolLatency,
@@ -146,6 +147,38 @@ export function tokensOption(
         lineStyle: { color: c.secondary, type: 'dashed' },
       },
     ],
+  }
+}
+
+export function versionAdoptionOption(
+  adoption: KitVersionAdoption,
+  c: Colors,
+  granularity: MetricsGranularity,
+  bounds?: TimeBounds
+): EChartsOption {
+  // One stacked line+area per major version, so the reader sees both each
+  // version's absolute usage and how the mix shifts as a repo migrates.
+  const pal = palette(c)
+  const series = adoption.versions.map((version, i) => ({
+    name: version,
+    type: 'line' as const,
+    stack: 'uses',
+    smooth: true,
+    areaStyle: { opacity: 0.22 },
+    data: adoption.buckets.map((b) => [
+      bucketToEpochMs(b.day),
+      b.counts[version] ?? 0,
+    ]),
+    itemStyle: { color: pal[i % pal.length] },
+    lineStyle: { color: pal[i % pal.length] },
+  }))
+  return {
+    tooltip: { trigger: 'axis', formatter: timeSeriesTooltip(granularity) },
+    legend: { data: adoption.versions, top: 0 },
+    grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
+    xAxis: timeAxis(granularity, bounds),
+    yAxis: { type: 'value', name: 'served', minInterval: 1 },
+    series,
   }
 }
 

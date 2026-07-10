@@ -194,20 +194,26 @@ def build_trait_docs() -> list[TraitDoc]:
     return docs
 
 
-def build_section_refs(kit_names: list[str]) -> list[SectionRef]:
+def build_section_refs(
+    kit_names: list[str], version: str | None = None
+) -> list[SectionRef]:
     """
     Return section references (with ranking text) for the named kits.
 
-    Uses :func:`app.kits.read_kit_outline`, so the latest version of each
-    kit is described.
+    Uses :func:`app.kits.read_kit_outline`. By default the latest version
+    of each kit is described; pass *version* to describe a specific major
+    for every named kit (the resolver passes the conservatively-served
+    version so sections are ranked against the version actually inlined,
+    not the latest).
 
     :param kit_names: Kit names to describe.
+    :param version: Optional major version applied to every named kit.
     :returns: A flat list of :class:`SectionRef` across all kits, in kit
         then document order.
     """
     refs: list[SectionRef] = []
     for name in kit_names:
-        outline = read_kit_outline(name)
+        outline = read_kit_outline(name, version)
         version = outline["version"]
         for section in outline["sections"]:
             title = section["title"]
