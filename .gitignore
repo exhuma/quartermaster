@@ -1,0 +1,3 @@
+# go-task's checksum cache for the `sources:`/`generates:` of the `changelog`
+# task (see Taskfile.yaml). Build artifact — never committed.
+.task/

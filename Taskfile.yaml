@@ -106,3 +106,18 @@ tasks:
     deps:
       - backend
       - frontend
+
+  changelog:
+    desc: Render the changelog from changelog.in (root CHANGELOG.md + served JSON)
+    # Runs from the repo root: changelog.in and changelog-releases.yaml live
+    # here, and clproc resolves the release-file relative to the working dir.
+    # clproc is a dev-only dependency of the server project, hence --project.
+    sources:
+      - changelog.in
+      - changelog-releases.yaml
+    generates:
+      - CHANGELOG.md
+      - server/app/assets/text/changelog.json
+    cmds:
+      - uv run --project server clproc changelog.in render -f md   -o CHANGELOG.md
+      - uv run --project server clproc changelog.in render -f json -o server/app/assets/text/changelog.json

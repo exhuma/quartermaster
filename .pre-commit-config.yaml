@@ -1,0 +1,23 @@
+# Pre-commit hooks. Install with `pre-commit install` (optional; the same
+# rendering is available any time via `task changelog`).
+#
+# The changelog is a render-and-commit artifact: changelog.in is the single
+# source of truth, and CHANGELOG.md + server/app/assets/text/changelog.json are
+# generated from it. These hooks re-render on any change to the source and let
+# pre-commit fail the commit if the committed outputs are stale (pre-commit
+# reports "files were modified by this hook"), so the two can never drift.
+repos:
+  - repo: local
+    hooks:
+      - id: render-changelog-md
+        name: render CHANGELOG.md (clproc)
+        entry: uv run --project server clproc changelog.in render -f md -o CHANGELOG.md
+        language: system
+        pass_filenames: false
+        files: '^(changelog\.in|changelog-releases\.yaml|CHANGELOG\.md)$'
+      - id: render-changelog-json
+        name: render changelog.json (clproc)
+        entry: uv run --project server clproc changelog.in render -f json -o server/app/assets/text/changelog.json
+        language: system
+        pass_filenames: false
+        files: '^(changelog\.in|changelog-releases\.yaml|server/app/assets/text/changelog\.json)$'

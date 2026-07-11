@@ -1,152 +1,235 @@
 # Changelog
 
-All notable changes to the Quartermaster server are documented here. The
-format is based on [Keep a Changelog](https://keepachangelog.com/), and the
-project aims to follow semantic versioning.
 
-## Unreleased
+## Release 2026.7.11
 
 ### Added
+- ☆ **[MCP] Per-repo kit version pinning via a repo-side
+  `.quartermaster.toml`**
 
-- Harness-enforced `resolve_kits` adoption. Agents reliably call `resolve_kits`
-  at session start but drift off it during ongoing edits: the server's guidance
-  is correct but, left to model discretion, decays over a long session. Two
-  fixes ship together. (1) The MCP `instructions` string and the `resolve_kits`
-  docstring now carry an explicit, checkable **re-run trigger list** — call it
-  again on a change/plan request, when starting a new subsystem/aspect, on a
-  direction shift, and after a context compaction before editing — and state
-  plainly that this is a standing behavior that stays reliable only when the
-  client harness enforces it. (2) A new **harness enforcement** section on the
-  Integrate page ships copy-pasteable Claude Code hooks that reproduce the
-  pattern: a `UserPromptSubmit` reminder (plain stdout injected as context), a
-  non-blocking `PreToolUse` edit nudge that emits an `additionalContext`
-  envelope and stays silent once `resolve_kits` has run this session, and a
-  `PostToolUse` recorder that flips that switch — per-session state keyed on the
-  hook's `session_id` under a gitignored XDG cache dir. The page also documents
-  equivalents for other agents from current research: opencode, Cursor, Cline
-  and Windsurf expose hooks (with examples and caveats — notably opencode has no
-  prompt-submit hook and may not fire tool hooks for MCP calls), while Continue,
-  Aider and Zed are rules-only and get a strongly-worded trigger list instead.
-  The canonical scripts live once under `webui/src/docs/claude-code/`, are
-  inlined into the UI verbatim via Vite `?raw`, are exercised by
-  `server/tests/test_claude_code_hooks.py`, and are dogfooded by this repo's own
-  `.claude/settings.json`.
-- Long-lived tokens for MCP bearer auth: app tokens (the same credentials used
-  as the WebDAV Basic password) are now accepted as
-  `Authorization: Bearer <token>` on the MCP mount and the REST API. This gives
-  clients that can't refresh OAuth — notably opencode, whose refresh handling
-  is unreliable — a stable credential that never expires. Validation is a
-  fallback in `JWTAuthMiddleware`: a bearer value that is not a JWT is checked
-  against the app-token store (constant-time, same as the DAV/metrics path) and
-  binds to the minting user's subject, so private-kit ownership and roles are
-  unchanged. No new store, endpoint, TTL, or scope — the existing
-  `/api/app-tokens` mechanism is reused as-is. The token mint/list/revoke card
-  is now a shared web-UI component surfaced on both the **Mount** and
-  **Integration** pages, and the Integration page documents the bearer-token
-  setup (opencode static-header config).
-- Authorization with two roles — `editor` (admin: edits the shared catalog and
-  grants/revokes editor from others) and `consumer` (read-only, the default).
-  An IdP subject (`sub`) → role mapping is persisted as TOML
-  (`QM_ROLE_STORE_PATH`, default `server/var/roles.toml`); unknown users
-  default to `consumer`. Bootstrap editors are seeded via `QM_INITIAL_EDITORS`
-  (comma-separated or JSON array of `sub`s) and can never be locked out. New
-  endpoints: `GET /api/me`, editor-only `GET/PUT/DELETE /api/roles`. Web UI
-  gains a **Users** admin screen and hides edit controls for consumers. See
-  `MIGRATING-AUTHORIZATION.md`.
-- Private kits: any authenticated user (consumers included — ownership, not
-  role, is the gate) can author standalone kits under `QM_PRIVATE_KITS_ROOT`
-  (default `server/var/private-kits/`), visible **only to the owner** across
-  `list_kits`/`select_kits`/`resolve_kits`/`get_kit` over the MCP and never to
-  anyone else (non-owner reads return 404). Managed via `/api/private-kits` and
-  a **Private** web-UI screen. The shared trait vocabulary and embedding cache
-  stay public-only, so private kits never poison them.
-- Caller identity is now carried into FastMCP tool calls (via a context
-  variable bound by a plain-ASGI wrapper at the `/kits` mount), which is what
-  makes owner-only private-kit visibility work over the MCP.
-- Metrics dashboard time-series granularity toggle: a Hourly/Daily switch next
-  to the window selector re-buckets the "Tokens sent to clients" and "Catalog
-  growth" charts. The 24h window defaults to hourly (`1h`) buckets, the 7d/30d
-  windows to daily (`1d`); the switch overrides the default for the current
-  window. `GET /api/metrics/overview` gains a `granularity` (`1h`/`1d`) query
-  parameter (echoed in `meta.granularity`, falls back to `1d`). Daily catalog
-  snapshots are forward-filled across hourly buckets so both chart series stay
-  on one aligned x-axis.
-- Multi-root kit catalogs ("layers"): compose several catalogs as an ordered
-  base → overlay stack via `QM_KIT_LAYERS_FILE` (a TOML layers file; relative
-  paths resolve against the file's directory). Kit-level shadowing (the
-  highest-priority layer owns a kit entirely), with base-layer sections marked
-  `binding = true` surviving shadowing. Each layer is addressable at
-  `/api/kits/layers/<name>/...` and `/dav/<name>/`, and can be marked
-  `readonly = true` (writes → HTTP 403). A single `QM_KITS_ROOT` is fully
-  backward compatible (treated as one `default` layer; `/dav/` and `/api/kits`
-  URLs unchanged). See `MIGRATING-KIT-LAYERS.md`.
-- Hardening HTTP middleware (module-http-middleware-hardening): a per-request
-  correlation ID (`X-Correlation-ID`, honoured inbound, echoed back, shared by
-  every log line via a contextvar), the three standard security headers, an
-  `X-Quartermaster-Version` response header, and one structured access-log line
-  per request.
-- Opt-in rate limiting on the client-registration and app-token-minting
-  endpoints (HTTP 429 with the full RFC 6585 header set).
-- Dedicated `GET /livez`, `GET /readyz`, and `GET /healthz` probes
-  (module-observability-healthz) with a compact, security-minimized payload and
-  503-on-fail. The existing `GET /health` remains as a liveness alias.
-- Web UI build-identity strip (`BuildMeta.vue`): a source-repository link
-  (module-github-link) and a commit chip + identicon (module-release-metadata),
-  fed by build-time `VITE_GITHUB_REPO_URL` / `VITE_APP_COMMIT` /
-  `VITE_APP_BUILD_TIME` ARGs wired through the Dockerfile, compose, and CI. Each
-  element is hidden when its variable is absent.
+  A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
 
-### Security
+- [UI] Public pre-login landing page
 
-- Kit mutations now require the `editor` role. Every kit-writing REST route and
-  every WebDAV write method (`PUT`/`DELETE`/`MKCOL`/`MOVE`/`COPY`/`PROPPATCH`/
-  `LOCK`) is gated → **HTTP 403** for consumers (default-deny). This closes the
-  path where any authenticated user, or any minted app token, could modify the
-  shared catalog. **Breaking for existing deployments** — set
-  `QM_INITIAL_EDITORS` to keep editing; see `MIGRATING-AUTHORIZATION.md`.
-- Ownership and roles now key on the stable Keycloak `sub` (immutable) rather
-  than `preferred_username`. App tokens minted before this release should be
-  revoked and re-minted (they only grant WebDAV/metrics access).
-- The bearer-token 401 response no longer echoes the raw PyJWT exception text
-  to the client (it is logged instead) — module-auth-oidc-python.
+  A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
+
 
 ### Changed
+- [UI] Tactical navy/brass redesign with light and dark theming
 
-- REST API: `POST` endpoints that create a resource now return a `Location`
-  header (kit/version creation, client registration, app-token minting).
-- The web UI now ships both a light and a dark Vuetify theme.
+  The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
 
-### Changed (breaking)
 
-- REST API: `DELETE /api/kits/{name}/versions/{version}` and
-  `DELETE .../sections/{section_id}` now return **204 No Content** with no body
-  (previously 200 with the updated list). Fetch the collection with `GET` if
-  you need the post-delete state. Both remain idempotent.
-- **All server environment variables are now prefixed with `QM_`** (e.g.
-  `KEYCLOAK_URL` → `QM_KEYCLOAK_URL`, `KITS_ROOT` → `QM_KITS_ROOT`,
-  `LOG_LEVEL` → `QM_LOG_LEVEL`). This namespaces Quartermaster's configuration
-  and avoids collisions with unrelated environment variables. **Action
-  required:** rename every variable in your `.env`, Docker `ENV`, and
-  `docker-compose` environment to the `QM_`-prefixed form. The browser/SPA
-  build variables (`VITE_*`) are unchanged. See `contract.md` for the full
-  configuration contract.
+## Release 2026.7.4 (2026-07-04)
 
-## v0.1.0 — Initial public release
+### Added
+- [MCP] MCP prompt templates bundled as package markdown *@
+  2026.7.4a1*
 
-First public release of **Quartermaster**, a self-hosted MCP server that
+  The canned MCP prompts are now maintained as bundled markdown templates rather than inline strings, so the prompt text delivered to clients is easier to review and extend.
+
+
+## Release 2026.7.3 (2026-07-03)
+
+### Added
+- ☆ **[MCP] Harness-enforced `resolve_kits` re-run triggers** *@
+  2026.7.3a3*
+
+  The MCP `instructions` string and the `resolve_kits` docstring now carry an explicit re-run trigger list: call it again on a change/plan request, when starting a new subsystem, on a direction shift, and after a context compaction.
+
+- ☆ **[MCP] App tokens accepted as `Authorization: Bearer` on the MCP
+  mount** *@ 2026.7.3a2*
+
+  Long-lived app tokens now work as bearer credentials on the MCP mount and REST API, giving clients that cannot refresh OAuth (notably opencode) a stable credential.
+
+- [UI] Integrate page ships copy-pasteable agent enforcement hooks *@
+  2026.7.3a3*
+
+  The Integrate page gained a harness-enforcement section with ready-to-paste Claude Code hooks (and guidance for opencode, Cursor, Cline, Windsurf and rules-only agents) that keep `resolve_kits` firing throughout a session.
+
+
+### Fixed
+- [UI] Metrics time-series render on a real UTC time axis *@
+  2026.7.3a2*
+
+  The metrics dashboard now plots its series against an actual UTC time axis instead of evenly-spaced buckets.
+
+
+## Release 2026.7.2 (2026-07-02)
+
+### Added
+- ☆ **[MCP] Guided auto-evolution: catalog-recall gap detection** *@
+  2026.7.2a3*
+
+  When trait inference finds nothing, `resolve_kits` now runs a fuzzy recall pass and reports a genuine catalog gap. New tools `check_existing_gap_issue` and `request_clarification_or_addition` let an agent surface the gap to maintainers.
+
+- [MCP] Per-user memory tools `get_my_memory` / `reset_my_memory` *@
+  2026.7.2a3*
+
+  A bounded, per-caller familiarity profile derived from your own resolve history nudges kit ranking (never overriding a real trait match). It is viewable and resettable over the MCP.
+
+
+### Changed
+- [UI] Catalog-growth metrics chart gains a domain selector *@
+  2026.7.2a1*
+
+  The catalog-growth chart can now be filtered by domain.
+
+
+## Release 2026.7.1 (2026-07-01)
+
+Authorization (editor/consumer roles) and owner-only private kits land
+
+together — the largest behavioural change since the initial release.
+
+
+
+### Added
+- ☆ **[MCP] Owner-only private kits over the MCP** *@ 2026.7.1a4*
+
+  Any authenticated user can author private kits that are visible only to them across `list_kits`, `select_kits`, `resolve_kits` and `get_kit`. Non-owner reads return 404 and private kits never poison the shared trait vocabulary.
+
+- [UI] Users admin screen and Private kits screen *@ 2026.7.1a4*
+
+  The web UI gained a Users admin screen (role management) and a Private screen for authoring owner-only kits. Edit controls are hidden for consumers.
+
+- [API] Editor/consumer roles with `GET /api/me` and `/api/roles` *@
+  2026.7.1a4*
+
+  Two roles are introduced — editor (manages the shared catalog and grants roles) and consumer (read-only default) — with new endpoints to read your role and manage the subject-to-role mapping.
+
+- [UI] Metrics dashboard 1h/1d granularity toggle *@ 2026.7.1a3*
+
+  An Hourly/Daily switch re-buckets the token and catalog-growth charts. `GET /api/metrics/overview` gained a `granularity` parameter.
+
+
+### Changed
+- [UI] Kit-layer chip and centred app-bar navigation *@ 2026.7.1a2*
+
+  The active kit layer is shown as a chip and the top navigation was centred.
+
+
+### Security
+- [Security] Kit mutations now require the editor role (HTTP 403 for
+  consumers) *@ 2026.7.1a4*
+
+  Every kit-writing REST route and WebDAV write method is gated to editors (default-deny). Breaking for existing deployments: set QM_INITIAL_EDITORS to keep editing.
+
+
+## Release 2026.6.30 (2026-06-30)
+
+### Added
+- [UI] Always-on local metrics dashboard (independent of
+  OpenTelemetry) *@ 2026.6.30a2*
+
+  A built-in metrics dashboard now works without any external OTEL collector.
+
+- [MCP] Onboarding prompts *@ 2026.6.30a1*
+
+  New canned MCP prompts guide first-time integration.
+
+
+### Changed
+- ☆ **[MCP] `resolve_kits` aligned with MCP prompts, sampling and
+  elicitation** *@ 2026.6.30a1*
+
+  Trait inference now prefers the connecting client's own LLM via MCP sampling (degrading to embeddings, then a lexical floor) and can elicit a clarification. A diagnostic mode reports which engine produced the result.
+
+
+## Release 2026.6.26 (2026-06-26)
+
+Broad hardening pass plus the introduction of the one-shot 
+`resolve_kits`
+discovery tool. Note the breaking `QM_` environment-
+variable prefix and
+the DELETE-returns-204 API change.
+
+
+
+### Added
+- ☆ **[MCP] `resolve_kits` one-shot discovery tool** *@ 2026.6.26a4*
+
+  Free-text task in, ranked kits out with each kit's always_load sections already inlined. Server-side trait inference collapses the whole list/select/explain/outline/get discovery loop into a single call.
+
+- [UI] Build-identity strip: source-repository link and commit chip *@
+  2026.6.26a3*
+
+  The web UI can show a link to the source repository plus a commit chip and identicon, each hidden when its build variable is absent.
+
+- [Ops] Health probes `/livez`, `/readyz`, `/healthz` and hardening
+  middleware *@ 2026.6.26a3*
+
+  Dedicated liveness/readiness probes, a per-request correlation id, standard security headers, an X-Quartermaster-Version header, and opt-in rate limiting on registration/token endpoints.
+
+- [UI] Dark Vuetify theme alongside the existing light theme *@
+  2026.6.26a3*
+
+  The web UI ships both a light and a dark theme.
+
+- [MCP] Tool-call audit logging *@ 2026.6.26a1*
+
+  Every MCP tool call is now audit-logged on the server.
+
+
+### Changed
+- [MCP] Discovery surfaces now lead with `resolve_kits` *@
+  2026.6.26a4*
+
+  The tool docstrings and server instructions steer clients to `resolve_kits` as the default discovery entry point.
+
+- [Ops] All server environment variables are now prefixed with `QM_`
+  *@ 2026.6.26a3*
+
+  Configuration is namespaced (e.g. KEYCLOAK_URL becomes QM_KEYCLOAK_URL, KITS_ROOT becomes QM_KITS_ROOT). Breaking: rename every server variable to the QM_ form. VITE_* build variables are unchanged.
+
+- [API] POST creates return a Location header, DELETE returns 204 No
+  Content *@ 2026.6.26a3*
+
+  Resource-creating POSTs now return a Location header. DELETE of a kit version or section returns 204 No Content with no body (breaking for clients that read the old 200 payload).
+
+
+## Release 2026.6.25 (2026-06-25)
+
+### Added
+- [UI] opencode integration setup on the Integrate page *@
+  2026.6.25a3*
+
+  The Integrate page documents how to connect the opencode client.
+
+- [Ops] Configurable TLS verification for Keycloak validation *@
+  2026.6.25a2*
+
+  TLS verification against the Keycloak realm can be configured for self-hosted / proxied setups.
+
+
+## Release 0.1.0 (2026-06-25)
+
+First public release of Quartermaster — a self-hosted MCP server that
+
 serves versioned AI instruction kits to coding agents.
 
-- FastAPI + FastMCP backend exposing the kit MCP tools (`list_kits`,
-  `get_kit_outline`, `get_kit`, `list_kit_versions`, `compare_kit_versions`)
-  and the V2 trait-based selector (`list_available_traits`, `select_kits`,
-  `explain_kit_candidate`).
-- Keycloak-gated auth (`JWTAuthMiddleware`) terminating inside the
-  application, with RFC 9728 / RFC 8414 OAuth discovery for OAuth-aware
-  clients, and an optional fixed-header mode.
-- REST admin API (`/api`) for kit CRUD, client registration, integration
-  discovery, and app-token management; embedded WebDAV authoring at `/dav`.
-- Vue 3 + Vuetify single-page web UI for kit management and MCP integration
-  setup.
-- The kit catalog is decoupled from the server: supplied at runtime via
-  `QM_KITS_ROOT` and never bundled into the image.
-- Container image published to GitHub Container Registry.
+
+
+### Added
+- [UI] Vue 3 + Vuetify web UI for kit management and MCP integration
+
+  A single-page web UI for browsing/managing kits and setting up MCP integration.
+
+- [MCP] V2 trait-based selector: list_available_traits, select_kits,
+  explain_kit_candidate
+
+  Kits are ranked against a project's traits (languages/frameworks/capabilities/contexts) with requires/excludes/priority.
+
+- [MCP] Initial kit toolset: list_kits, get_kit_outline, get_kit,
+  list_kit_versions, compare_kit_versions
+
+  First public release of the kit MCP tools for loading versioned instruction kits on demand.
+
+
+### Support
+- [Ops] Keycloak-gated auth, REST admin API and embedded WebDAV
+  authoring
+
+  Auth terminates in the application (Keycloak JWTs), with a REST admin API and a WebDAV authoring endpoint. The kit catalog is supplied at runtime and never bundled.
+
+

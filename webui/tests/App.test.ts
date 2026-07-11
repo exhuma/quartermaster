@@ -55,6 +55,7 @@ const router = createRouter({
     { path: '/mount', name: 'mount', component: stub },
     { path: '/metrics', name: 'metrics', component: stub },
     { path: '/admin/users', name: 'admin-users', component: stub },
+    { path: '/changelog', name: 'changelog', component: stub },
   ],
 })
 

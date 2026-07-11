@@ -1,0 +1,75 @@
+# -*- changelog-version: 2.0 -*-
+# -*- release-nodes: 3 -*-
+# -*- release-file: changelog-releases.yaml -*-
+#
+# Behaviour-focused changelog for Quartermaster. Every entry describes a change
+# an MCP client or a web-UI user can observe; pure chore/build/refactor commits
+# are intentionally omitted. This file is the single source of truth: the root
+# CHANGELOG.md (Markdown) and server/app/assets/text/changelog.json (served to
+# the web UI) are both rendered from it with `task changelog` (clproc).
+#
+# Each subject is prefixed with an audience marker the web UI turns into a
+# filterable chip: [MCP] (tool behaviour), [UI] (web UI), [API] (REST), or
+# [Ops] (operation/deployment). The `highlight` column ("x") marks the most
+# important MCP-behaviour milestones.
+#
+# Columns:
+#   version ; type ; subject ; issue_ids ; internal ; highlight ; detail
+# type is a "Keep a Changelog" value (added/changed/security/fixed/support/...).
+#
+# version     ; type     ; subject                                                                          ; issues ; i ; h ; detail
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
+2026.7.11     ; added    ; [UI] Public pre-login landing page                                               ;        ;   ;   ; A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
+2026.7.11     ; changed  ; [UI] Tactical navy/brass redesign with light and dark theming                    ;        ;   ;   ; The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
+2026.7.11     ; added    ; [MCP] Per-repo kit version pinning via a repo-side `.quartermaster.toml`          ;        ;   ; x ; A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
+
+# --- 2026.7.4 ------------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.4a1    ; added    ; [MCP] MCP prompt templates bundled as package markdown                           ;        ;   ;   ; The canned MCP prompts are now maintained as bundled markdown templates rather than inline strings, so the prompt text delivered to clients is easier to review and extend.
+
+# --- 2026.7.3 ------------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.3a3    ; added    ; [MCP] Harness-enforced `resolve_kits` re-run triggers                            ;        ;   ; x ; The MCP `instructions` string and the `resolve_kits` docstring now carry an explicit re-run trigger list: call it again on a change/plan request, when starting a new subsystem, on a direction shift, and after a context compaction.
+2026.7.3a3    ; added    ; [UI] Integrate page ships copy-pasteable agent enforcement hooks                 ;        ;   ;   ; The Integrate page gained a harness-enforcement section with ready-to-paste Claude Code hooks (and guidance for opencode, Cursor, Cline, Windsurf and rules-only agents) that keep `resolve_kits` firing throughout a session.
+2026.7.3a2    ; added    ; [MCP] App tokens accepted as `Authorization: Bearer` on the MCP mount            ;        ;   ; x ; Long-lived app tokens now work as bearer credentials on the MCP mount and REST API, giving clients that cannot refresh OAuth (notably opencode) a stable credential.
+2026.7.3a2    ; fixed    ; [UI] Metrics time-series render on a real UTC time axis                          ;        ;   ;   ; The metrics dashboard now plots its series against an actual UTC time axis instead of evenly-spaced buckets.
+
+# --- 2026.7.2 ------------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.2a3    ; added    ; [MCP] Guided auto-evolution: catalog-recall gap detection                        ;        ;   ; x ; When trait inference finds nothing, `resolve_kits` now runs a fuzzy recall pass and reports a genuine catalog gap. New tools `check_existing_gap_issue` and `request_clarification_or_addition` let an agent surface the gap to maintainers.
+2026.7.2a3    ; added    ; [MCP] Per-user memory tools `get_my_memory` / `reset_my_memory`                  ;        ;   ;   ; A bounded, per-caller familiarity profile derived from your own resolve history nudges kit ranking (never overriding a real trait match). It is viewable and resettable over the MCP.
+2026.7.2a1    ; changed  ; [UI] Catalog-growth metrics chart gains a domain selector                       ;        ;   ;   ; The catalog-growth chart can now be filtered by domain.
+
+# --- 2026.7.1 ------------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.1a4    ; added    ; [MCP] Owner-only private kits over the MCP                                       ;        ;   ; x ; Any authenticated user can author private kits that are visible only to them across `list_kits`, `select_kits`, `resolve_kits` and `get_kit`. Non-owner reads return 404 and private kits never poison the shared trait vocabulary.
+2026.7.1a4    ; added    ; [API] Editor/consumer roles with `GET /api/me` and `/api/roles`                 ;        ;   ;   ; Two roles are introduced — editor (manages the shared catalog and grants roles) and consumer (read-only default) — with new endpoints to read your role and manage the subject-to-role mapping.
+2026.7.1a4    ; security ; [Security] Kit mutations now require the editor role (HTTP 403 for consumers)     ;        ;   ;   ; Every kit-writing REST route and WebDAV write method is gated to editors (default-deny). Breaking for existing deployments: set QM_INITIAL_EDITORS to keep editing.
+2026.7.1a4    ; added    ; [UI] Users admin screen and Private kits screen                                  ;        ;   ;   ; The web UI gained a Users admin screen (role management) and a Private screen for authoring owner-only kits. Edit controls are hidden for consumers.
+2026.7.1a3    ; added    ; [UI] Metrics dashboard 1h/1d granularity toggle                                  ;        ;   ;   ; An Hourly/Daily switch re-buckets the token and catalog-growth charts. `GET /api/metrics/overview` gained a `granularity` parameter.
+2026.7.1a2    ; changed  ; [UI] Kit-layer chip and centred app-bar navigation                               ;        ;   ;   ; The active kit layer is shown as a chip and the top navigation was centred.
+
+# --- 2026.6.30 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.6.30a1   ; changed  ; [MCP] `resolve_kits` aligned with MCP prompts, sampling and elicitation           ;        ;   ; x ; Trait inference now prefers the connecting client's own LLM via MCP sampling (degrading to embeddings, then a lexical floor) and can elicit a clarification. A diagnostic mode reports which engine produced the result.
+2026.6.30a1   ; added    ; [MCP] Onboarding prompts                                                         ;        ;   ;   ; New canned MCP prompts guide first-time integration.
+2026.6.30a2   ; added    ; [UI] Always-on local metrics dashboard (independent of OpenTelemetry)            ;        ;   ;   ; A built-in metrics dashboard now works without any external OTEL collector.
+
+# --- 2026.6.26 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.6.26a4   ; added    ; [MCP] `resolve_kits` one-shot discovery tool                                     ;        ;   ; x ; Free-text task in, ranked kits out with each kit's always_load sections already inlined. Server-side trait inference collapses the whole list/select/explain/outline/get discovery loop into a single call.
+2026.6.26a4   ; changed  ; [MCP] Discovery surfaces now lead with `resolve_kits`                            ;        ;   ;   ; The tool docstrings and server instructions steer clients to `resolve_kits` as the default discovery entry point.
+2026.6.26a1   ; added    ; [MCP] Tool-call audit logging                                                    ;        ;   ;   ; Every MCP tool call is now audit-logged on the server.
+2026.6.26a3   ; added    ; [UI] Dark Vuetify theme alongside the existing light theme                       ;        ;   ;   ; The web UI ships both a light and a dark theme.
+2026.6.26a3   ; changed  ; [API] POST creates return a Location header, DELETE returns 204 No Content        ;        ;   ;   ; Resource-creating POSTs now return a Location header. DELETE of a kit version or section returns 204 No Content with no body (breaking for clients that read the old 200 payload).
+2026.6.26a3   ; changed  ; [Ops] All server environment variables are now prefixed with `QM_`               ;        ;   ;   ; Configuration is namespaced (e.g. KEYCLOAK_URL becomes QM_KEYCLOAK_URL, KITS_ROOT becomes QM_KITS_ROOT). Breaking: rename every server variable to the QM_ form. VITE_* build variables are unchanged.
+2026.6.26a3   ; added    ; [Ops] Health probes `/livez`, `/readyz`, `/healthz` and hardening middleware     ;        ;   ;   ; Dedicated liveness/readiness probes, a per-request correlation id, standard security headers, an X-Quartermaster-Version header, and opt-in rate limiting on registration/token endpoints.
+2026.6.26a3   ; added    ; [UI] Build-identity strip: source-repository link and commit chip                ;        ;   ;   ; The web UI can show a link to the source repository plus a commit chip and identicon, each hidden when its build variable is absent.
+
+# --- 2026.6.25 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.6.25a3   ; added    ; [UI] opencode integration setup on the Integrate page                            ;        ;   ;   ; The Integrate page documents how to connect the opencode client.
+2026.6.25a2   ; added    ; [Ops] Configurable TLS verification for Keycloak validation                      ;        ;   ;   ; TLS verification against the Keycloak realm can be configured for self-hosted / proxied setups.
+
+# --- 0.1.0 — Initial public release -------------------------------------------------------------------------------------------------------------------------------
+0.1.0         ; added    ; [MCP] Initial kit toolset: list_kits, get_kit_outline, get_kit, list_kit_versions, compare_kit_versions ; ; ; ; First public release of the kit MCP tools for loading versioned instruction kits on demand.
+0.1.0         ; added    ; [MCP] V2 trait-based selector: list_available_traits, select_kits, explain_kit_candidate ; ; ; ; Kits are ranked against a project's traits (languages/frameworks/capabilities/contexts) with requires/excludes/priority.
+0.1.0         ; added    ; [UI] Vue 3 + Vuetify web UI for kit management and MCP integration               ;        ;   ;   ; A single-page web UI for browsing/managing kits and setting up MCP integration.
+0.1.0         ; support  ; [Ops] Keycloak-gated auth, REST admin API and embedded WebDAV authoring          ;        ;   ;   ; Auth terminates in the application (Keycloak JWTs), with a REST admin API and a WebDAV authoring endpoint. The kit catalog is supplied at runtime and never bundled.
+
+# vim: set filetype=csv textwidth=0 :
