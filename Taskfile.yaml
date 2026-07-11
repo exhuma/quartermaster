@@ -62,8 +62,19 @@ tasks:
     # catalog (server/var/kits — gitignored) so the backend boots out of the
     # box; override it by setting QM_KITS_ROOT in server/.env to point at your
     # real kit-catalog checkout.
+    #
+    # `task run` is a local-dev command, so it also enables the dev-auth bypass
+    # (module-dev-auth-bypass) so a fresh clone is usable with NO Keycloak: the
+    # SPA auto-logs-in via the server's /auth/dev token endpoint. These are
+    # DEV-ONLY — never used by the Docker/uvicorn production path, and inert
+    # unless BOTH are set. Override or disable per-run via server/.env or the
+    # shell (e.g. QM_DEV_AUTH_ENABLED=false task run).
     env:
       QM_KITS_ROOT: '{{.QM_KITS_ROOT | default "var/kits"}}'
+      QM_DEV_AUTH_ENABLED: '{{.QM_DEV_AUTH_ENABLED | default "true"}}'
+      # Static (not per-invocation random): uvicorn --reload restarts workers,
+      # and a changing secret would invalidate already-issued dev tokens.
+      QM_DEV_SHARED_SECRET: '{{.QM_DEV_SHARED_SECRET | default "local-dev-only-secret-change-for-shared-use"}}'
     cmds:
       - mkdir -p "$QM_KITS_ROOT"
       - uv run uvicorn app.main:app --reload
@@ -71,6 +82,13 @@ tasks:
   frontend:
     desc: Run the Vue/Vuetify dev server on http://localhost:5173
     dir: webui
+    # Enable the frontend half of the dev-auth bypass so `task run` auto-logs-in
+    # locally without Keycloak (pairs with the backend task's QM_DEV_AUTH_ENABLED).
+    # Vite reads VITE_-prefixed vars straight from the process env, so no
+    # webui/.env file is needed. Dev-only: it folds to `false` in any production
+    # build (import.meta.env.DEV is false there). Override via VITE_DEV_AUTH.
+    env:
+      VITE_DEV_AUTH: '{{.VITE_DEV_AUTH | default "true"}}'
     preconditions:
       - sh: test -d node_modules
         msg: 'Frontend deps are not installed — run `task install` (or `task setup`) first.'

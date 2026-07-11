@@ -189,6 +189,12 @@ production**: it is off by default, gated independently on the backend and
 frontend, and the frontend half is dead-code-eliminated from production
 builds (verified by `npm run check:no-dev-auth`).
 
+`task run` enables this bypass automatically — it injects
+`QM_DEV_AUTH_ENABLED` + `QM_DEV_SHARED_SECRET` (backend) and `VITE_DEV_AUTH`
+(frontend) for the dev servers, so a fresh clone auto-logs-in with no manual
+setup. Disable it per-run with `QM_DEV_AUTH_ENABLED=false task run`. The manual
+recipe below is for running the servers without Task.
+
 Enable it on **both** sides:
 
 ```bash

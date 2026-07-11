@@ -7,6 +7,14 @@ trying it out — for real authentication and deployment, see the
 
 **You need:** Python with [`uv`](https://docs.astral.sh/uv/), and Node 22+ with npm.
 
+> **Fastest path (Taskfile):** if you have [`task`](https://taskfile.dev)
+> installed, `task setup && task run` boots the backend and web UI together with
+> the dev-auth bypass already enabled — no manual env editing. Drop a kit into
+> `server/var/kits/` (same layout as step 1, using that path instead of
+> `/tmp/qm-kits`) so there's something to list, then open
+> <http://localhost:5173>. The manual steps below are the equivalent
+> without Task.
+
 ---
 
 ## 1. Make a tiny kit catalog
