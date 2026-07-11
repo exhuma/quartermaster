@@ -19,6 +19,11 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8000',
       '/kits': 'http://localhost:8000',
+      // Public changelog JSON. Served by the FastAPI backend (rendered from
+      // changelog.in into app/assets/text/changelog.json), NOT a static file in
+      // webui/public — so it must be proxied in dev too, otherwise the SPA's
+      // same-origin fetch would resolve against Vite's dev server and 404.
+      '/changelog.json': 'http://localhost:8000',
       // Dev-only auth bypass endpoint (only mounted when the server has
       // DEV_AUTH_ENABLED). Scoped to /auth/dev so it never shadows the
       // SPA's own /auth/callback client route.
