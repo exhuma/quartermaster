@@ -25,6 +25,7 @@ from app.kits import (
     _load_kit_index,
     _parse_changelog,
     _parse_version_tuple,
+    _validate_manifest,
     _version_key,
     compare_kit_versions,
     resolve_effective_version,
@@ -715,6 +716,128 @@ def test_catalog_entries_strict_raises(
     )
     with pytest.raises(ValueError):
         _catalog_entries(strict=True)
+
+
+_BASE_MANIFEST = {
+    "kit_type": "module",
+    "summary": "Some kit.",
+    "domains": ["governance"],
+    "languages": [],
+    "frameworks": [],
+    "contexts": [],
+    "requires": {
+        "languages": [],
+        "frameworks": [],
+        "capabilities": [],
+        "contexts": [],
+    },
+    "excludes": {
+        "languages": [],
+        "frameworks": [],
+        "capabilities": [],
+        "contexts": [],
+    },
+    "optional_signals": [],
+    "related_kits": [],
+    "priority": 10,
+}
+
+
+def test_always_apply_parses_as_optional_bool() -> None:
+    # Present bool.
+    assert (
+        _validate_manifest({**_BASE_MANIFEST, "always_apply": True}, "k")
+    ).always_apply is True
+    # Absent -> defaults False (legacy manifests are unaffected).
+    assert _validate_manifest(dict(_BASE_MANIFEST), "k").always_apply is False
+    # Non-bool -> rejected.
+    with pytest.raises(ValueError):
+        _validate_manifest({**_BASE_MANIFEST, "always_apply": "yes"}, "k")
+
+
+def _write_policy_kit(base: Path, name: str, manifest_extra: dict) -> None:
+    _write_kit_version(
+        base,
+        name,
+        "v1",
+        summary=f"{name} summary.",
+        sections=[
+            {
+                "file": "invariant.md",
+                "title": "Policy",
+                "gloss": "Baseline policy",
+                "always_load": True,
+                "body": "## Policy\n\nRules.\n",
+            }
+        ],
+    )
+    (base / name / "applicability.json").write_text(
+        json.dumps({**_BASE_MANIFEST, **manifest_extra}), encoding="utf-8"
+    )
+
+
+def test_select_kits_v2_injects_global_policy_kit(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A global policy kit (always_apply, no requires) that matches nothing is
+    # still injected, below threshold, flagged policy=True.
+    _write_policy_kit(kit_root, "kit-policy", {"always_apply": True})
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": kit_root})(),
+    )
+    result = select_kits_v2(
+        languages=["python"], frameworks=["fastapi"], contexts=["backend"]
+    )
+    by_name = {c["name"]: c for c in result["candidates"]}
+    assert "kit-policy" in by_name
+    assert by_name["kit-policy"]["policy"] is True
+
+
+def test_select_kits_v2_pending_policy_kit_emits_need_trait(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A project-type policy kit requiring a language not provided is injected
+    # and surfaces need-trait + needs so clarification can pick it up.
+    _write_policy_kit(
+        kit_root,
+        "kit-py-policy",
+        {
+            "always_apply": True,
+            "requires": {
+                "languages": ["python"],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": kit_root})(),
+    )
+    result = select_kits_v2(frameworks=["fastapi"])
+    by_name = {c["name"]: c for c in result["candidates"]}
+    assert "kit-py-policy" in by_name
+    assert "need-trait:languages" in by_name["kit-py-policy"]["reasons"]
+    assert by_name["kit-py-policy"]["needs"] == {"languages": ["python"]}
+
+
+def test_select_kits_v2_policy_disabled_skips_injection(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_policy_kit(kit_root, "kit-policy", {"always_apply": True})
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S", (), {"kits_root": kit_root, "policy_enabled": False}
+        )(),
+    )
+    result = select_kits_v2(
+        languages=["python"], frameworks=["fastapi"], contexts=["backend"]
+    )
+    names = [c["name"] for c in result["candidates"]]
+    assert "kit-policy" not in names
 
 
 def test_select_kits_v2_skips_broken_manifest(

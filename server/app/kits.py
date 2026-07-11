@@ -236,6 +236,10 @@ class KitApplicability:
     :param optional_signals: Additional weak signals for ranking.
     :param related_kits: Kit names frequently used together.
     :param priority: Base ranking priority (higher means preferred).
+    :param always_apply: When true, this kit is policy: it is injected on
+        every resolve whose ``requires``/``excludes`` gates it satisfies,
+        bypassing the score threshold (see :func:`select_kits_v2`). Optional;
+        defaults to ``False`` so existing manifests need no change.
     """
 
     kit_type: str
@@ -249,6 +253,7 @@ class KitApplicability:
     optional_signals: list[str]
     related_kits: list[str]
     priority: int
+    always_apply: bool = False
 
 
 @dataclass(frozen=True)
@@ -455,6 +460,14 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
             f"Manifest field 'priority' for kit {kit_name!r} must be int"
         )
 
+    # Optional policy flag. Absent on legacy manifests (the catalog is
+    # external), so it defaults to False rather than joining required_fields.
+    always_apply = raw.get("always_apply", False)
+    if not isinstance(always_apply, bool):
+        raise ValueError(
+            f"Manifest field 'always_apply' for kit {kit_name!r} must be bool"
+        )
+
     return KitApplicability(
         kit_type=kit_type,
         summary=summary,
@@ -471,6 +484,7 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
             raw["related_kits"], field_name="related_kits"
         ),
         priority=priority,
+        always_apply=always_apply,
     )
 
 
@@ -918,6 +932,10 @@ def _evaluate_candidate(
     uncertain = False
     ineligible = False
     matched_dimensions: set[str] = set()
+    # Per-dimension required values the task did not provide, keyed by trait
+    # category. Feeds the clarification detector (app/clarify.py) so it can
+    # offer the exact legal answers a blocking kit needs.
+    needs: dict[str, list[str]] = {}
 
     provided = {
         "languages": set(traits.languages),
@@ -967,6 +985,7 @@ def _evaluate_candidate(
         else:
             uncertain = True
             reasons.append(f"need-trait:{key}")
+            needs[key] = sorted(required)
 
     if ineligible:
         confidence = "low"
@@ -986,6 +1005,8 @@ def _evaluate_candidate(
         "reasons": reasons,
         "summary": applicability.summary,
         "matched_dimensions": sorted(matched_dimensions),
+        "needs": needs,
+        "always_apply": applicability.always_apply,
     }
 
 
@@ -1156,6 +1177,16 @@ def list_available_traits_v2() -> dict[str, Any]:
     }
 
 
+def _policy_enabled() -> bool:
+    """Whether always-apply policy injection is on (tolerant of bad config)."""
+    from pydantic import ValidationError
+
+    try:
+        return bool(getattr(get_settings(), "policy_enabled", True))
+    except ValidationError:
+        return True
+
+
 def select_kits_v2(
     *,
     languages: list[str] | None = None,
@@ -1244,6 +1275,24 @@ def select_kits_v2(
         )
     )
 
+    # Always-apply policy kits: inject every gate-eligible ``always_apply`` kit
+    # not already selected, bypassing the score threshold and the ``limit`` cap
+    # (policy is mandatory, added on top). Done AFTER confidence/coverage so a
+    # mandatory kit never inflates the recommendation's own confidence. A
+    # fully-satisfied policy kit is delivered; one still missing a required
+    # trait rides along "pending" (non-empty ``needs``) so its ``need-trait``
+    # reason drives clarification (app/clarify.py) — the resolver skips inlining
+    # its body until the trait is known, so possibly-wrong project-type policy
+    # is never delivered.
+    if _policy_enabled():
+        selected_names = {candidate["name"] for candidate in selected}
+        selected = selected + [
+            candidate
+            for candidate in eligible
+            if candidate["always_apply"]
+            and candidate["name"] not in selected_names
+        ]
+
     return {
         "candidates": [
             {
@@ -1254,6 +1303,8 @@ def select_kits_v2(
                 "confidence": candidate["confidence"],
                 "reasons": candidate["reasons"],
                 "summary": candidate["summary"],
+                "needs": candidate["needs"],
+                "policy": candidate["always_apply"],
             }
             for candidate in selected
         ],

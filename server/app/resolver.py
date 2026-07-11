@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app import telemetry
+from app.clarify import detect_clarification
 from app.config import get_settings
 from app.gap import detect_gap
 from app.identity import current_sub
@@ -315,6 +316,68 @@ def _gap_block(signal: Any) -> dict[str, Any] | None:
     }
 
 
+# Human-facing presentation for the clarification block. Kept here (not in
+# app/clarify.py) so the detector stays pure structured data.
+_CLARIFY_QUESTION_TEXT = {
+    "languages": "Which programming language is this project written in?",
+    "frameworks": "Which application/framework does this project use?",
+    "capabilities": "Which capability best describes this work?",
+    "contexts": "What project context does this apply to?",
+}
+_CLARIFY_HINT = {
+    "languages": (
+        "Inspect the repo: *.csproj/*.sln → csharp; pyproject.toml/setup.py/"
+        "requirements.txt → python; package.json → javascript (tsconfig.json "
+        "present → typescript); go.mod → go; Cargo.toml → rust; pom.xml/"
+        "build.gradle → java."
+    ),
+    "frameworks": (
+        "Inspect dependency manifests: fastapi/django/flask in "
+        "pyproject.toml; react/vue/express in package.json; the framework "
+        "packages give it away."
+    ),
+    "capabilities": (
+        "Infer from the task and nearby code which capability is being added."
+    ),
+    "contexts": (
+        "Infer from the repo layout (backend/frontend/docs/infra directories)."
+    ),
+}
+_CLARIFY_HOW_TO_ANSWER = (
+    "A pivotal project trait is missing, so kits cannot be confidently "
+    "chosen. Answer each question YOURSELF from the repository before asking "
+    "the human: inspect the files named in each question's `hint`, pick the "
+    "matching "
+    "`option`, then re-call resolve_kits with the answer folded into `task` "
+    "(e.g. append '(python; pyproject.toml present)'). Only surface a question "
+    "to the human when repo inspection is genuinely ambiguous."
+)
+
+
+def _clarification_block(signal: Any) -> dict[str, Any] | None:
+    """Return the public ``clarification`` response field, or ``None``."""
+    if signal is None:
+        return None
+    return {
+        "needed": True,
+        "reason": signal.reason,
+        "how_to_answer": _CLARIFY_HOW_TO_ANSWER,
+        "questions": [
+            {
+                "category": question.category,
+                "question": _CLARIFY_QUESTION_TEXT.get(
+                    question.category, f"Which {question.category}?"
+                ),
+                "why": question.why,
+                "options": question.options,
+                "hint": _CLARIFY_HINT.get(question.category, ""),
+                "blocking_kits": question.blocking_kits,
+            }
+            for question in signal.questions
+        ],
+    }
+
+
 def _maybe_apply_memory_nudge(
     candidates: list[dict[str, Any]], subject: str | None
 ) -> list[dict[str, Any]]:
@@ -442,10 +505,26 @@ def resolve_kits(
     # catalog-recall pass before treating it as a genuine gap (a real match
     # here means the miss was in wording/inference, not catalog coverage).
     gap_signal = None
+    clarify_signal = None
     if not inferred.has_any():
         gap_signal = detect_gap(task=task)
         if gap_signal is not None:
             telemetry.record_gap_detected()
+    else:
+        # Inference found *something* but a pivotal required trait may still be
+        # missing (e.g. "add a database" with no language). Ask the agent to
+        # resolve it from repo inspection and re-resolve. Mutually exclusive
+        # with the gap path above by the has_any() guards.
+        clarify_signal = detect_clarification(
+            selection=selection,
+            inferred={
+                "languages": inferred.languages,
+                "frameworks": inferred.frameworks,
+                "capabilities": inferred.capabilities,
+                "contexts": inferred.contexts,
+            },
+            vocab=vocab,
+        )
 
     kits_out: list[dict[str, Any]] = []
     total_delivered = 0
@@ -462,6 +541,30 @@ def resolve_kits(
             version, advisory = resolve_effective_version(
                 name, pin=pins.get(name)
             )
+
+            # A policy kit still missing a required trait: surface it as
+            # pending mandatory policy but deliver no body — its project type
+            # is unknown, so its content might be the wrong policy. The
+            # companion clarification block asks for the trait that unlocks it.
+            if candidate.get("policy") and candidate.get("needs"):
+                kit_out = {
+                    "name": name,
+                    "version": version,
+                    "score": candidate["score"],
+                    "confidence": candidate["confidence"],
+                    "reasons": candidate["reasons"],
+                    "summary": candidate["summary"],
+                    "sections": [],
+                    "always_load_markdown": "",
+                    "fetch_on_demand": [],
+                    "policy": True,
+                    "policy_pending": True,
+                }
+                if advisory is not None:
+                    kit_out["version_advisory"] = advisory
+                kits_out.append(kit_out)
+                continue
+
             refs = build_section_refs([name], version)
             always = [r for r in refs if r.always_load]
             rest = [r for r in refs if not r.always_load]
@@ -522,6 +625,7 @@ def resolve_kits(
                 "sections": descriptors,
                 "always_load_markdown": markdown,
                 "fetch_on_demand": offered_ids,
+                "policy": bool(candidate.get("policy")),
             }
             if advisory is not None:
                 kit_out["version_advisory"] = advisory
@@ -606,4 +710,5 @@ def resolve_kits(
         "kits": kits_out,
         "warnings": selection["warnings"],
         "gap": _gap_block(gap_signal),
+        "clarification": _clarification_block(clarify_signal),
     }

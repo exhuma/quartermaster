@@ -666,9 +666,20 @@ def _build_diagnostics(result: dict, *, clarification_used: bool) -> dict:
     :returns: The diagnostics block to attach under ``result["_diagnostics"]``.
     """
     traits = result.get("inferred_traits", {})
+    clarification = result.get("clarification")
     return {
         "engine": result.get("engine"),
         "clarification_used": clarification_used,
+        "clarification_requested": clarification is not None,
+        "clarification_categories": [
+            question["category"]
+            for question in (clarification or {}).get("questions", [])
+        ],
+        "policy_kits": [
+            kit["name"]
+            for kit in result.get("kits", [])
+            if kit.get("policy")
+        ],
         "trait_provenance": traits.get("provenance", []),
         "kit_scores": [
             {
@@ -737,9 +748,12 @@ async def resolve_kits(
     :param project_id: Optional stable repo label from ``.quartermaster.toml``,
         recorded with adoption telemetry only.
     :returns: ``{engine, inferred_traits, confidence, coverage,
-        broadening_recommended, kits, warnings}``; each kit carries
-        ``sections``, ``always_load_markdown`` and ``fetch_on_demand``. When
-        *include_diagnostics* is set, also ``_diagnostics``.
+        broadening_recommended, kits, warnings, gap, clarification}``; each kit
+        carries ``sections``, ``always_load_markdown``, ``fetch_on_demand`` and
+        a ``policy`` flag (mandatory always-apply kits). When ``clarification``
+        is non-null a pivotal trait is missing — answer its ``questions`` from
+        repo inspection and re-resolve. When *include_diagnostics* is set, also
+        ``_diagnostics``.
     :raises ValueError: If *task* is empty and the client cannot be asked to
         clarify (no elicitation support).
     """
@@ -783,8 +797,15 @@ async def resolve_kits(
 
     # One clarification round on a weak match: ask for detail, then re-resolve
     # with the enriched task. Declining keeps the best-effort first result.
+    # A structured `clarification` block takes precedence: it lets the calling
+    # agent resolve the missing trait autonomously from repo inspection, so we
+    # do not interrupt the human here — return the block untouched instead.
     clarification_used = False
-    if can_elicit and _is_low_confidence(result, settings):
+    if (
+        can_elicit
+        and result.get("clarification") is None
+        and _is_low_confidence(result, settings)
+    ):
         extra = await _elicit_text(ctx, _LOW_CONFIDENCE_ELICIT)
         if extra:
             clarification_used = True
