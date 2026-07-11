@@ -75,6 +75,12 @@ tasks:
       # Static (not per-invocation random): uvicorn --reload restarts workers,
       # and a changing secret would invalidate already-issued dev tokens.
       QM_DEV_SHARED_SECRET: '{{.QM_DEV_SHARED_SECRET | default "local-dev-only-secret-change-for-shared-use"}}'
+      # Seed the dev-auth user as a bootstrap editor so the UI is fully usable
+      # out of the box (otherwise it defaults to read-only "consumer"). The
+      # /auth/dev token's subject is "dev:<username>", so the default user is
+      # "dev:dev". Roles are resolved server-side from the token `sub`, never a
+      # token roles claim (see app/storage/role_store.py).
+      QM_INITIAL_EDITORS: '{{.QM_INITIAL_EDITORS | default "dev:dev"}}'
     cmds:
       - mkdir -p "$QM_KITS_ROOT"
       - uv run uvicorn app.main:app --reload
