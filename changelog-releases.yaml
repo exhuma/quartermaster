@@ -14,7 +14,9 @@ releases:
     notes: |
       A public pre-login landing page and a tactical navy/brass redesign make
       the web UI legible before sign-in, and repositories can now pin the kit
-      version they expect via a repo-side `.quartermaster.toml`.
+      version they expect via a repo-side `.quartermaster.toml`. A single
+      malformed kit no longer takes the whole catalog down — it is isolated,
+      flagged in the UI, and skipped by selection.
   "2026.7.4":
     date: 2026-07-04
     notes: ""

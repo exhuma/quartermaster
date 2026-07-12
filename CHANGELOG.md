@@ -7,7 +7,11 @@ A public pre-login landing page and a tactical navy/brass redesign
 make
 the web UI legible before sign-in, and repositories can now pin 
 the kit
-version they expect via a repo-side `.quartermaster.toml`.
+version they expect via a repo-side `.quartermaster.toml`. A 
+single
+malformed kit no longer takes the whole catalog down — it is 
+isolated,
+flagged in the UI, and skipped by selection.
 
 
 
@@ -16,6 +20,10 @@ version they expect via a repo-side `.quartermaster.toml`.
   `.quartermaster.toml`** *@ 2026.7.12a1*
 
   A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
+
+- [UI] Broken kits surfaced in the kit list *@ 2026.7.12a3*
+
+  The kit list flags a malformed kit with an alert row and its load error (and no detail link) so it can be found and fixed.
 
 - [UI] Public pre-login landing page *@ 2026.7.12a1*
 
@@ -27,6 +35,17 @@ version they expect via a repo-side `.quartermaster.toml`.
   2026.7.12a1*
 
   The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
+
+
+### Fixed
+- ☆ **[MCP] A broken kit no longer takes down the whole catalog** *@
+  2026.7.12a3*
+
+  A kit whose instructions index is missing or malformed is now isolated and excluded from selection instead of aborting the entire catalog load, so `list_kits`/`resolve_kits` keep serving every healthy kit.
+
+- [UI] Bare `/docs` reaches the documentation site *@ 2026.7.12a3*
+
+  Visiting `/docs` now redirects to the rendered docs index instead of returning the app shell, and a "Docs" link was added to the top navigation.
 
 
 ## Release 2026.7.4 (2026-07-04)

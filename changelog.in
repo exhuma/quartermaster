@@ -23,6 +23,9 @@
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
 
 # --- 2026.7.12 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.12a3   ; fixed    ; [MCP] A broken kit no longer takes down the whole catalog                         ;        ;   ; x ; A kit whose instructions index is missing or malformed is now isolated and excluded from selection instead of aborting the entire catalog load, so `list_kits`/`resolve_kits` keep serving every healthy kit.
+2026.7.12a3   ; added    ; [UI] Broken kits surfaced in the kit list                                         ;        ;   ;   ; The kit list flags a malformed kit with an alert row and its load error (and no detail link) so it can be found and fixed.
+2026.7.12a3   ; fixed    ; [UI] Bare `/docs` reaches the documentation site                                  ;        ;   ;   ; Visiting `/docs` now redirects to the rendered docs index instead of returning the app shell, and a "Docs" link was added to the top navigation.
 2026.7.12a1   ; added    ; [UI] Public pre-login landing page                                               ;        ;   ;   ; A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
 2026.7.12a1   ; changed  ; [UI] Tactical navy/brass redesign with light and dark theming                    ;        ;   ;   ; The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
 2026.7.12a1   ; added    ; [MCP] Per-repo kit version pinning via a repo-side `.quartermaster.toml`          ;        ;   ; x ; A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
