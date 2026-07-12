@@ -6,7 +6,7 @@ rollout of the server-side inference for `resolve_kits` — **local embeddings
 first, then an external LLM**.
 
 For the authoritative, exhaustive list of every setting see the
-[Configuration reference](README.md#configuration-reference). This document is
+[Configuration reference](https://github.com/exhuma/quartermaster/blob/main/README.md#configuration-reference). This document is
 the operational view: what to mount, what to set, and how to verify.
 
 ---
@@ -133,7 +133,7 @@ VS Code once OAuth discovery has run) with a task like *"add a FastAPI REST
 endpoint"* and inspect the response: the top-level **`engine`** field reports
 which layer answered.
 
-```jsonc
+```text
 {
   "engine": "embedding",          // <- local embeddings are active
   "inferred_traits": { "frameworks": ["fastapi"], ... },
@@ -225,10 +225,10 @@ Call `resolve_kits` again and check the `engine` field:
 
 ## 6. Compose
 
-The repo ships [`server/docker-compose.yml`](server/docker-compose.yml) for a
+The repo ships [`server/docker-compose.yml`](https://github.com/exhuma/quartermaster/blob/main/server/docker-compose.yml) for a
 Traefik v3 front end. To enable the inference stages, add the relevant
 variables to your `.env` (copy from
-[`server/.env.example`](server/.env.example), which has an annotated
+[`server/.env.example`](https://github.com/exhuma/quartermaster/blob/main/server/.env.example), which has an annotated
 *"server-side inference"* section):
 
 ```yaml
@@ -288,5 +288,5 @@ or scrape Prometheus via `QM_METRICS_PROMETHEUS_ENABLED` (auth: app-token Basic
 by default, or `QM_METRICS_ALLOW_ANONYMOUS` behind network isolation). With
 nothing configured the layer is inert.
 
-See **[OBSERVABILITY.md](OBSERVABILITY.md)** for the full metric reference, KPI
+See **[Observability](observability.md)** for the full metric reference, KPI
 recipes (PromQL), a suggested Grafana dashboard, and the trace span tree.

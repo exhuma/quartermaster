@@ -104,7 +104,7 @@ and no public MCP caller — can see them.
 > server can resolve them). This protects visibility between users, **not**
 > against a server operator. True end-to-end encryption is deliberately out of
 > scope here; the trade-offs are analysed in
-> [`server/docs/research/private-kits-e2ee.md`](server/docs/research/private-kits-e2ee.md).
+> [`server/docs/research/private-kits-e2ee.md`](https://github.com/exhuma/quartermaster/blob/main/server/docs/research/private-kits-e2ee.md).
 
 ---
 

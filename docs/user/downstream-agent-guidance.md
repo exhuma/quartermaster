@@ -4,9 +4,10 @@ This page explains the guidance you should put in a repository's `AGENTS.md`
 (or `CLAUDE.md`) so a coding agent discovers applicable instruction kits from
 Quartermaster *reliably* and *token-efficiently*.
 
-It is **not** about authoring kits (see [AUTHORING_KITS.md](AUTHORING_KITS.md))
-or about working inside this server's own codebase (see
-[`.ai/rules.md`](.ai/rules.md)). It is the short briefing a downstream project
+It is **not** about authoring kits (see
+[Authoring kits](../developer/authoring-kits.md)) or about working inside this
+server's own codebase (see
+[`.ai/rules.md`](https://github.com/exhuma/quartermaster/blob/main/.ai/rules.md)). It is the short briefing a downstream project
 gives its agents so they drive Quartermaster well.
 
 > The detailed routine lives in **one** place — Quartermaster's

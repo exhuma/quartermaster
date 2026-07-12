@@ -87,6 +87,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/changelog',
+      name: 'changelog',
+      component: () => import('@/views/ChangelogView.vue'),
+      // Public: no `requiresAuth`, so the changelog renders before sign-in. The
+      // served data (GET /changelog.json) is likewise unauthenticated.
+    },
+    {
       path: '/auth/callback',
       name: 'auth-callback',
       component: () => import('@/views/AuthCallbackView.vue'),

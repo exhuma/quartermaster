@@ -97,6 +97,7 @@ from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
+from app.changelog import load_changelog_json
 from app.templating import load_asset
 from app.routers import (
     app_tokens,
@@ -128,6 +129,7 @@ from app.tokens import count_tokens
 from app.traits import load_vocabulary
 from app.user_agent import UserAgentMiddleware
 from app.version import app_version
+from app.docs_site import mount_docs
 from app.webui import mount_webui
 
 # ---------------------------------------------------------------------------
@@ -1049,6 +1051,25 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+async def changelog_json() -> Response:
+    """
+    Serve the project's behaviour-focused changelog as JSON.
+
+    Public and unauthenticated — the path sits outside the ``/api``/``/kits``/
+    ``/dav`` protected prefixes and carries no vendor ``Accept`` requirement, so
+    the changelog is readable before sign-in (and curl-able). The payload is the
+    clproc-rendered array served verbatim from the bundled asset (see
+    :mod:`app.changelog`).
+
+    :returns: ``application/json`` array of releases (newest first).
+    """
+    return Response(
+        content=load_changelog_json(),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 async def metrics_endpoint() -> Response:
     """
     Prometheus pull endpoint.
@@ -1248,19 +1269,28 @@ def create_app() -> FastAPI:
             yield
 
     # Swagger docs are enabled so the vendor media-type contract is
-    # discoverable. They sit behind the auth + User-Agent middleware like
-    # the rest of the app (not in the public-path allowlist).
+    # discoverable. They live under ``/api`` so the root ``/docs`` path is free
+    # for the rendered documentation site (see ``app.docs_site``); both Swagger
+    # paths are re-exempted from auth (``app.auth._PUBLIC_PATHS``) and the
+    # User-Agent gate so they stay publicly loadable in a browser as before.
     application = FastAPI(
         title="Quartermaster MCP",
-        docs_url="/docs",
+        docs_url="/api/docs",
         redoc_url=None,
-        openapi_url="/openapi.json",
+        openapi_url="/api/openapi.json",
         lifespan=_lifespan,
     )
 
     # Health probes (module-observability-healthz). /health is kept as a
     # back-compat liveness alias for existing Docker/Traefik healthchecks.
     application.add_api_route("/health", health, methods=["GET"])
+    # Public, behaviour-focused changelog served to the web UI. Registered here
+    # (before ``mount_webui``) so it beats the SPA history fallback; the ``.json``
+    # suffix keeps it distinct from the client-side ``/changelog`` route. It is
+    # public by virtue of sitting outside the protected prefixes (see app.auth).
+    application.add_api_route(
+        "/changelog.json", changelog_json, methods=["GET"]
+    )
     application.add_api_route("/livez", health_probes.livez, methods=["GET"])
     application.add_api_route("/readyz", health_probes.readyz, methods=["GET"])
     application.add_api_route(
@@ -1335,9 +1365,14 @@ def create_app() -> FastAPI:
             "/metrics", metrics_endpoint, methods=["GET"]
         )
 
+    # Serve the rendered documentation site at /docs (no-op when there is no
+    # build). Mounted before the SPA so the /docs sub-app is matched ahead of
+    # the SPA history fallback's catch-all route.
+    mount_docs(application)
+
     # Serve the built SPA + /config.js (no-op when there is no build). The
     # SPA fallback route is added last so it never shadows /api, /kits, the
-    # well-known docs, or Swagger.
+    # well-known docs, Swagger, or the /docs site.
     mount_webui(application)
 
     # Middleware ORDER MATTERS: Starlette applies middleware LIFO, so the

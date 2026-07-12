@@ -1,0 +1,7 @@
+# go-task's checksum cache for the `sources:`/`generates:` of the `changelog`
+# task (see Taskfile.yaml). Build artifact — never committed.
+.task/
+
+# Rendered Sphinx documentation (see `task docs`). Built fresh locally and in
+# the Docker docs stage — never committed.
+docs/_build/

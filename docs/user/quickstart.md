@@ -3,7 +3,8 @@
 Get the server **and** web UI running in a few minutes, with **no Keycloak**
 and no external kit catalog, using the built-in dev-auth bypass. This is for
 trying it out — for real authentication and deployment, see the
-[README](README.md) and [DEVELOPMENT.md](DEVELOPMENT.md).
+[README](https://github.com/exhuma/quartermaster/blob/main/README.md) and
+[Development](../developer/development.md).
 
 **You need:** Python with [`uv`](https://docs.astral.sh/uv/), and Node 22+ with npm.
 
@@ -59,7 +60,7 @@ cat > /tmp/qm-kits/hello-kit/v1/instructions/invariant.md <<'MD'
 MD
 ```
 
-(Authoring real kits: see [AUTHORING_KITS.md](AUTHORING_KITS.md).)
+(Authoring real kits: see [Authoring kits](../developer/authoring-kits.md).)
 
 ## 2. Start the backend (dev auth, no Keycloak)
 
@@ -132,4 +133,5 @@ Then call `list_kits` / `get_kit` from the agent.
   bypass only works under the Vite dev server (`npm run dev`); it is
   dead-code-eliminated from production builds, including the GHCR image.
 - **For real auth + deployment** (Keycloak setup, Docker + Traefik, GHCR
-  image), follow the [README](README.md).
+  image), follow the
+  [README](https://github.com/exhuma/quartermaster/blob/main/README.md).

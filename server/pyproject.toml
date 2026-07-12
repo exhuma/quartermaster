@@ -30,7 +30,7 @@ embeddings = [
     "fastembed>=0.4",
 ]
 # OpenTelemetry metrics + traces and tiktoken token counting (see
-# docs/observability.md). Optional: without it the instrumentation code is
+# docs/operator/observability.md). Optional: without it the instrumentation code is
 # inert (no-op tracer, in-process no-op metrics) and token sizes fall back to
 # a bytes/4 estimate. The Docker image installs this extra and pre-seeds the
 # tiktoken vocab for offline use.
@@ -51,6 +51,20 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "mypy>=1.11",
+    # Changelog processor (render-and-commit): turns the repo-root changelog.in
+    # into the root CHANGELOG.md and the served app/assets/text/changelog.json.
+    # Dev/build-only — never imported at runtime; run via `task changelog`.
+    "clproc>=2024",
+]
+# Documentation site toolchain (Sphinx + furo). Build-time only, never imported
+# at runtime — mirrors how `clproc` sits in the dev group. Autodoc imports the
+# `app` package, so this group is installed on top of the app's own venv (see
+# the docs stage in server/Dockerfile). Run via `task docs`.
+docs = [
+    "sphinx>=8",
+    "furo",
+    "sphinx-autodoc-typehints",
+    "myst-parser",
 ]
 
 # Scope wheel discovery to the app package explicitly. Auto-discovery would
@@ -62,11 +76,13 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["app*"]
 
-# Ship the bundled markdown text assets (MCP prompt bodies, server-instructions
-# body) inside the wheel; setuptools packages only `.py` by default. Loaded at
-# runtime via app.templating (importlib.resources).
+# Ship the bundled text assets inside the wheel; setuptools packages only `.py`
+# by default. Loaded at runtime via app.templating (importlib.resources). The
+# `.md` glob covers the MCP prompt bodies and server-instructions body; the
+# `.json` glob covers the generated changelog (assets/text/changelog.json,
+# rendered from the repo-root changelog.in by `task changelog`).
 [tool.setuptools.package-data]
-app = ["assets/**/*.md"]
+app = ["assets/**/*.md", "assets/**/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

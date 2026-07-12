@@ -14,7 +14,7 @@ git tag -a v2026.6.25-beta.1 -m "Quartermaster v2026.6.25-beta.1"
 git push origin v2026.6.25-beta.1
 ```
 
-The [`build-push`](.github/workflows/build-push.yml) workflow runs the tests,
+The [`build-push`](https://github.com/exhuma/quartermaster/blob/main/.github/workflows/build-push.yml) workflow runs the tests,
 then builds and publishes:
 
 - the **immutable full version**, e.g. `:2026.6.25-beta.1`, and
@@ -25,7 +25,7 @@ then builds and publishes:
 `stable ⊃ beta ⊃ alpha` — a more mature release also advances every
 less-mature channel, so each channel always points at the newest build that
 is *at least* that mature. Derived by
-[`scripts/derive_channels.sh`](scripts/derive_channels.sh):
+[`scripts/derive_channels.sh`](https://github.com/exhuma/quartermaster/blob/main/scripts/derive_channels.sh):
 
 | Tag                    | Channel tags moved          |
 |------------------------|-----------------------------|

@@ -1,0 +1,42 @@
+---
+# Release metadata for clproc (dates + notes per release). This file supplies
+# the release dates the web-UI changelog shows; clproc v2.0 keeps dates here
+# rather than on individual log entries. Keys are the aggregated release
+# versions (release-nodes = 3, so YYYY.M.D). A version present in changelog.in
+# but absent here renders with no date — used deliberately for "Unreleased".
+# Every release entry must carry both `date` and `notes` (notes may be empty).
+meta:
+  version: "1.0"
+
+releases:
+  "2026.7.4":
+    date: 2026-07-04
+    notes: ""
+  "2026.7.3":
+    date: 2026-07-03
+    notes: ""
+  "2026.7.2":
+    date: 2026-07-02
+    notes: ""
+  "2026.7.1":
+    date: 2026-07-01
+    notes: |
+      Authorization (editor/consumer roles) and owner-only private kits land
+      together — the largest behavioural change since the initial release.
+  "2026.6.30":
+    date: 2026-06-30
+    notes: ""
+  "2026.6.26":
+    date: 2026-06-26
+    notes: |
+      Broad hardening pass plus the introduction of the one-shot `resolve_kits`
+      discovery tool. Note the breaking `QM_` environment-variable prefix and
+      the DELETE-returns-204 API change.
+  "2026.6.25":
+    date: 2026-06-25
+    notes: ""
+  "0.1.0":
+    date: 2026-06-25
+    notes: |
+      First public release of Quartermaster — a self-hosted MCP server that
+      serves versioned AI instruction kits to coding agents.

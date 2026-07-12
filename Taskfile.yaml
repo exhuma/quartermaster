@@ -106,3 +106,64 @@ tasks:
     deps:
       - backend
       - frontend
+
+  changelog:
+    desc: Render the changelog from changelog.in (root CHANGELOG.md + served JSON)
+    # Runs from the repo root: changelog.in and changelog-releases.yaml live
+    # here, and clproc resolves the release-file relative to the working dir.
+    # clproc is a dev-only dependency of the server project, hence --project.
+    sources:
+      - changelog.in
+      - changelog-releases.yaml
+    generates:
+      - CHANGELOG.md
+      - server/app/assets/text/changelog.json
+    cmds:
+      - uv run --project server clproc changelog.in render -f md   -o CHANGELOG.md
+      - uv run --project server clproc changelog.in render -f json -o server/app/assets/text/changelog.json
+
+  docs:
+    desc: Render the Sphinx documentation site to docs/_build/html
+    # Autodoc imports the backend package, so the app sources feed the build in
+    # addition to the docs tree. `-W` (warnings = errors) matches CI and the
+    # Docker docs stage. The docs toolchain lives in the server's `docs`
+    # dependency group (build-only), hence --project/--group.
+    sources:
+      - docs/**/*
+      - server/app/**/*.py
+      - server/pyproject.toml
+      - CHANGELOG.md
+      - contract.md
+    generates:
+      - docs/_build/html/index.html
+    cmds:
+      - uv run --project server --group docs sphinx-build -W -b html docs docs/_build/html
+
+  docker-build:
+    desc: Build the release Docker image (server + web UI + bundled docs)
+    # Mirrors the CI release build (.github/workflows/build-push.yml): a single
+    # image with the built SPA and the rendered Sphinx docs baked in (the docs
+    # stage runs `sphinx-build -W`). The kit catalog is NOT baked — it is
+    # mounted at runtime. Build identity is derived from git, never hard-coded
+    # (module-dev-tooling-taskfile / module-release-metadata); override the tag
+    # with `task docker-build IMAGE=ghcr.io/exhuma/quartermaster:dev`.
+    vars:
+      IMAGE: '{{.IMAGE | default "quartermaster"}}'
+    env:
+      # The pushed git tag when building a release from a checked-out tag;
+      # empty otherwise (the SPA hides the version chip and the docs fall back
+      # to the pyproject version).
+      APP_VERSION:
+        sh: git describe --tags 2>/dev/null || echo ""
+      VITE_APP_COMMIT:
+        sh: git rev-parse HEAD
+      VITE_APP_BUILD_TIME:
+        sh: date -u +%Y-%m-%dT%H:%M:%SZ
+      VITE_GITHUB_REPO_URL: 'https://github.com/exhuma/quartermaster'
+    cmds:
+      - >-
+        docker build -f server/Dockerfile . -t {{.IMAGE}}
+        --build-arg APP_VERSION="$APP_VERSION"
+        --build-arg VITE_APP_COMMIT="$VITE_APP_COMMIT"
+        --build-arg VITE_APP_BUILD_TIME="$VITE_APP_BUILD_TIME"
+        --build-arg VITE_GITHUB_REPO_URL="$VITE_GITHUB_REPO_URL"

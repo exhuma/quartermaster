@@ -76,6 +76,13 @@ watch(
       </nav>
 
       <v-spacer />
+
+      <!-- Changelog: a public page (no auth), so it stays visible for anonymous
+           visitors too — outside the auth-gated centered <nav> above. -->
+      <v-btn variant="text" class="nav-btn" :to="{ name: 'changelog' }">
+        Changelog
+      </v-btn>
+
       <template v-if="isAuthenticated">
         <span class="mr-2 text-body-2 font-mono text-on-surface-variant">
           {{ displayName }}

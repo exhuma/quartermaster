@@ -25,6 +25,12 @@ describe('router table', () => {
     expect(resolved.meta.requiresAuth).toBe(true)
   })
 
+  it('serves a public changelog at /changelog', () => {
+    const resolved = router.resolve('/changelog')
+    expect(resolved.name).toBe('changelog')
+    expect(resolved.meta.requiresAuth).toBeFalsy()
+  })
+
   it('does not expose the kit list at /kits (reserved by the MCP mount)', () => {
     // /kits* is the backend MCP mount and 404s in the SPA fallback, so the
     // catalog must never live there.

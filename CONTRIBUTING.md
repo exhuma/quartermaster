@@ -6,7 +6,7 @@ instruction kits to coding agents.
 
 ## Getting set up
 
-See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the full local setup. In short:
+See [`DEVELOPMENT.md`](docs/developer/development.md) for the full local setup. In short:
 
 ```bash
 # Backend

@@ -45,20 +45,28 @@ _BROWSER_UA_RE = re.compile(r"^Mozilla/\d", re.IGNORECASE)
 # must be able to register before it is known). Matched as (method, path).
 _REGISTRATION_ROUTE = ("POST", "/api/clients")
 
+# Swagger UI + its schema live under ``/api`` (so the root ``/docs`` is free
+# for the rendered docs site) but must stay reachable by any client — Swagger
+# was UA-exempt when it served from ``/docs``, and OpenAPI generators fetch the
+# schema without a browser User-Agent. Exempt both explicitly.
+_SWAGGER_PATHS = frozenset({"/api/docs", "/api/openapi.json"})
+
 
 def _is_exempt(method: str, path: str) -> bool:
     """
     Return whether a request bypasses the User-Agent gate.
 
     The gate covers only the REST API, so anything outside ``/api`` (the
-    MCP mount, health, well-known docs, Swagger) is exempt, as is the
-    self-service registration route.
+    MCP mount, health, well-known docs) is exempt, as are the Swagger docs
+    and the self-service registration route.
 
     :param method: HTTP method.
     :param path: Request path.
     :returns: ``True`` if the request bypasses the gate.
     """
     if not path.startswith("/api/"):
+        return True
+    if path in _SWAGGER_PATHS:
         return True
     return (method, path) == _REGISTRATION_ROUTE
 
@@ -97,7 +105,7 @@ class UserAgentMiddleware(BaseHTTPMiddleware):
             content={
                 "detail": (
                     "Unrecognised client. Register your User-Agent with "
-                    f"POST {register_url} (see /docs), then retry. Browser "
+                    f"POST {register_url} (see /api/docs), then retry. Browser "
                     "clients are allowed automatically."
                 )
             },

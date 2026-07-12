@@ -9,5 +9,5 @@ plus catalog-derived "distinctness" analysis, feeding the in-app Metrics
 dashboard so usage is visible even when OTEL is broken or unconfigured.
 
 Long-term/production metrics still delegate to OTEL → Grafana (see
-``OBSERVABILITY.md``); this store is a short, capped complement.
+``docs/operator/observability.md``); this store is a short, capped complement.
 """

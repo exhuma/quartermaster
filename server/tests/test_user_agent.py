@@ -125,6 +125,17 @@ def test_mcp_endpoint_exempt_from_ua_gate(ua_client: TestClient) -> None:
     assert resp.status_code == 200
 
 
+def test_swagger_paths_exempt_from_ua_gate() -> None:
+    # Swagger moved under /api but stays UA-exempt (it was exempt at /docs,
+    # and OpenAPI generators fetch the schema without a browser User-Agent).
+    from app.user_agent import _is_exempt
+
+    assert _is_exempt("GET", "/api/docs") is True
+    assert _is_exempt("GET", "/api/openapi.json") is True
+    # A regular /api path is still gated.
+    assert _is_exempt("GET", "/api/kits") is False
+
+
 def test_registration_route_exempt_from_ua_gate(
     ua_client: TestClient,
 ) -> None:

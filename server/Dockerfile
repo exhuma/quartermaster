@@ -97,6 +97,34 @@ COPY server/app/ ./app/
 RUN uv pip install --python /app/.venv/bin/python --no-deps .
 
 # ---------------------------------------------------------------------------
+# Stage 2b — documentation build
+# ---------------------------------------------------------------------------
+# Reuse the builder — it has the backend package + all deps in /app/.venv, so
+# Sphinx autodoc can import ``app``. Add the build-only `docs` dependency group
+# (Sphinx + furo + MyST) on top and render the site to static HTML.
+FROM builder AS docs
+
+# The docs tree lives at the repo root; its MyST includes reach the root-level
+# CHANGELOG.md and contract.md, and conf.py reads server/pyproject.toml for the
+# fallback version + imports ``app`` from the copied source. Bring them in.
+COPY docs/ ./docs/
+COPY CHANGELOG.md contract.md ./
+COPY server/pyproject.toml ./server/pyproject.toml
+
+# Add the Sphinx toolchain to the shared venv. Re-specify the extras so the
+# sync does not prune them; --no-dev drops pytest/ruff/mypy/clproc.
+RUN uv sync --frozen --no-install-project --no-dev \
+    --extra embeddings --extra telemetry --group docs
+
+# Stamp the release version into the docs (falls back to pyproject when unset),
+# from the same single knob that feeds the SPA + API.
+ARG APP_VERSION
+ENV APP_VERSION=$APP_VERSION
+
+# Zero-warning HTML build (-W), matching CI and the module-docs-sphinx kit.
+RUN /app/.venv/bin/sphinx-build -W -b html docs docs/_build/html
+
+# ---------------------------------------------------------------------------
 # Stage 3 — runtime image
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS final
@@ -120,9 +148,11 @@ ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
 # (keyed by catalog fingerprint) are written into this same dir at runtime.
 COPY --from=builder --chown=appuser:appuser /app/embeddings /app/embeddings
 
-# Copy the application package and the built web UI — no kit content.
+# Copy the application package, the built web UI, and the rendered docs site —
+# no kit content.
 COPY server/app/ /app/server/app/
 COPY --from=frontend /webui/dist /app/server/webui_dist
+COPY --from=docs /build/docs/_build/html /app/server/docs_dist
 
 # The kit catalog is supplied at runtime via a mounted volume. Create the
 # mount point and make /data writable by the non-root user so the WebDAV
@@ -135,6 +165,8 @@ ENV QM_APP_TOKENS_PATH=/data/app_tokens.json
 # volume so its rolling window survives container restarts.
 ENV QM_METRICS_LOCAL_DB_PATH=/data/metrics.db
 ENV QM_WEBUI_DIST=/app/server/webui_dist
+# Rendered documentation site, served at /docs (app/docs_site.py).
+ENV QM_DOCS_DIST=/app/server/docs_dist
 # Embedding model + trait-embedding caches live under /app (baked into the
 # image above), NOT on the /data volume — a runtime bind mount over /data would
 # mask the baked model and reintroduce the cold-start download. The model is
