@@ -77,8 +77,20 @@ watch(
 
       <v-spacer />
 
-      <!-- Changelog: a public page (no auth), so it stays visible for anonymous
-           visitors too — outside the auth-gated centered <nav> above. -->
+      <!-- Docs + Changelog: public (no auth), so they stay visible for
+           anonymous visitors too — outside the auth-gated centered <nav> above.
+           Docs is a native anchor (not a router-link): the rendered Sphinx site
+           is served by the backend at /docs/, so it must do a real navigation
+           rather than be intercepted by vue-router. -->
+      <v-btn
+        variant="text"
+        class="nav-btn"
+        href="/docs/"
+        target="_blank"
+        rel="noopener"
+      >
+        Docs
+      </v-btn>
       <v-btn variant="text" class="nav-btn" :to="{ name: 'changelog' }">
         Changelog
       </v-btn>

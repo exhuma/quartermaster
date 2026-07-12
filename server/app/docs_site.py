@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import _DOCS_DIST_DEFAULT
@@ -59,6 +60,21 @@ def mount_docs(app: FastAPI) -> None:
     if not (dist / "index.html").is_file():
         logger.info("Docs site not mounted: no build at %s", dist)
         return
+
+    # Starlette's ``Mount("/docs")`` only matches ``/docs/…`` (its regex is
+    # ``^/docs/(?P<path>.*)$``), so a bare ``/docs`` would otherwise fall through
+    # to the SPA history fallback in ``app.webui`` and return the app shell.
+    # Register an explicit redirect for the bare path (before the mount, and
+    # before ``mount_webui``) so ``/docs`` reaches the docs index.
+    async def _docs_root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/docs/")
+
+    app.add_api_route(
+        "/docs",
+        _docs_root_redirect,
+        methods=["GET"],
+        include_in_schema=False,
+    )
 
     # ``html=True`` serves ``index.html`` for directory paths (e.g. ``/docs/``
     # and every Sphinx section directory), matching Sphinx's relative links.

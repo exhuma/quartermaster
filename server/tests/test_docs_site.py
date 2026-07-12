@@ -33,7 +33,11 @@ def docs_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "<!doctype html><title>Users</title>"
     )
     monkeypatch.setenv("QM_DOCS_DIST", str(dist))
-    app = FastAPI()
+    # Mirror the real app (app.main.create_app): Swagger is moved off the root
+    # "/docs" to "/api/docs" precisely so the rendered docs site can own "/docs".
+    # A bare FastAPI() would instead serve Swagger UI at "/docs" and mask the
+    # SPA-catch-all bug this suite guards against.
+    app = FastAPI(docs_url="/api/docs", redoc_url=None)
 
     # A SPA-style catch-all added AFTER mount_docs must not shadow /docs.
     docs_site.mount_docs(app)
@@ -64,6 +68,23 @@ def test_docs_mount_beats_spa_fallback(docs_app: TestClient) -> None:
     # The /docs mount is matched ahead of the catch-all, so the docs index —
     # not the SPA shell — is served.
     resp = docs_app.get("/docs/index.html")
+    assert resp.status_code == 200
+    assert "app shell" not in resp.text
+    assert "Quartermaster documentation" in resp.text
+
+
+def test_bare_docs_redirects_to_trailing_slash(docs_app: TestClient) -> None:
+    # Starlette's Mount("/docs") only matches "/docs/…", so without the explicit
+    # redirect the bare "/docs" would be swallowed by the SPA catch-all and
+    # return the app shell. It must instead redirect to "/docs/".
+    resp = docs_app.get("/docs", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/docs/"
+
+
+def test_bare_docs_resolves_to_docs_index(docs_app: TestClient) -> None:
+    # Following the redirect lands on the docs index, not the SPA shell.
+    resp = docs_app.get("/docs")
     assert resp.status_code == 200
     assert "app shell" not in resp.text
     assert "Quartermaster documentation" in resp.text
