@@ -129,6 +129,7 @@ from app.tokens import count_tokens
 from app.traits import load_vocabulary
 from app.user_agent import UserAgentMiddleware
 from app.version import app_version
+from app.docs_site import mount_docs
 from app.webui import mount_webui
 
 # ---------------------------------------------------------------------------
@@ -1268,13 +1269,15 @@ def create_app() -> FastAPI:
             yield
 
     # Swagger docs are enabled so the vendor media-type contract is
-    # discoverable. They sit behind the auth + User-Agent middleware like
-    # the rest of the app (not in the public-path allowlist).
+    # discoverable. They live under ``/api`` so the root ``/docs`` path is free
+    # for the rendered documentation site (see ``app.docs_site``); both Swagger
+    # paths are re-exempted from auth (``app.auth._PUBLIC_PATHS``) and the
+    # User-Agent gate so they stay publicly loadable in a browser as before.
     application = FastAPI(
         title="Quartermaster MCP",
-        docs_url="/docs",
+        docs_url="/api/docs",
         redoc_url=None,
-        openapi_url="/openapi.json",
+        openapi_url="/api/openapi.json",
         lifespan=_lifespan,
     )
 
@@ -1362,9 +1365,14 @@ def create_app() -> FastAPI:
             "/metrics", metrics_endpoint, methods=["GET"]
         )
 
+    # Serve the rendered documentation site at /docs (no-op when there is no
+    # build). Mounted before the SPA so the /docs sub-app is matched ahead of
+    # the SPA history fallback's catch-all route.
+    mount_docs(application)
+
     # Serve the built SPA + /config.js (no-op when there is no build). The
     # SPA fallback route is added last so it never shadows /api, /kits, the
-    # well-known docs, or Swagger.
+    # well-known docs, Swagger, or the /docs site.
     mount_webui(application)
 
     # Middleware ORDER MATTERS: Starlette applies middleware LIFO, so the

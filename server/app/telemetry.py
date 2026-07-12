@@ -6,7 +6,7 @@ providers, declares every instrument, and exposes small, defensive recording
 helpers that the rest of the app calls. Telemetry must never break a request:
 every public helper swallows its own errors and degrades to a no-op.
 
-**What it measures** (see ``docs/observability.md`` for the full reference and
+**What it measures** (see ``docs/operator/observability.md`` for the full reference and
 KPI recipes). The headline question is *how much content does the MCP deliver*,
 and whether that stays flat per domain as the catalog grows:
 

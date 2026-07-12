@@ -97,6 +97,19 @@ def test_spa_shell_path_is_public() -> None:
     assert _requires_auth("/integration") is False
     assert _requires_auth("/config.js") is False
     assert _requires_auth("/assets/index-abc.js") is False
+    # The docs site is public.
+    assert _requires_auth("/docs/") is False
+    assert _requires_auth("/docs/user/index.html") is False
+
+
+def test_relocated_swagger_paths_stay_public() -> None:
+    """Swagger moved under /api but must remain reachable without auth."""
+    from app.auth import _requires_auth
+
+    assert _requires_auth("/api/docs") is False
+    assert _requires_auth("/api/openapi.json") is False
+    # A different /api path is still protected.
+    assert _requires_auth("/api/kits") is True
 
 
 def test_fixed_headers_allow_access_when_enabled(

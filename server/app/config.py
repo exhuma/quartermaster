@@ -177,6 +177,10 @@ _APP_TOKENS_DEFAULT = _SERVER_ROOT / "var" / "app_tokens.json"
 # Built web-UI assets. Empty/missing → the SPA is simply not served (the
 # API and MCP still work); the Docker image points this at the built dist.
 _WEBUI_DIST_DEFAULT = _SERVER_ROOT / "webui_dist"
+# Rendered Sphinx documentation. Empty/missing → the /docs site is simply not
+# served (the API and MCP still work); the Docker image points this at the
+# built HTML produced by the docs stage.
+_DOCS_DIST_DEFAULT = _SERVER_ROOT / "docs_dist"
 _EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
 _METRICS_LOCAL_DB_DEFAULT = _SERVER_ROOT / "var" / "metrics.db"
 _ROLE_STORE_DEFAULT = _SERVER_ROOT / "var" / "roles.toml"
@@ -241,6 +245,10 @@ class Settings(BaseSettings):
     :param webui_dist: Directory of built web-UI assets to serve. When it
         does not exist the SPA is simply not mounted (the API and MCP are
         unaffected). The Docker image points this at the built ``dist``.
+    :param docs_dist: Directory of rendered Sphinx documentation to serve at
+        ``/docs``. When it does not exist the docs site is simply not mounted
+        (the API and MCP are unaffected). The Docker image points this at the
+        HTML produced by the docs build stage.
     :param app_tokens_path: Path to the JSON file storing hashed per-user
         WebDAV app tokens. Defaults to a dev-only path under ``server/var/``;
         set to a writable data-volume path in production.
@@ -413,6 +421,7 @@ class Settings(BaseSettings):
     private_kits_root: Path = _PRIVATE_KITS_DEFAULT
     dav_require_tls: bool = True
     webui_dist: Path = _WEBUI_DIST_DEFAULT
+    docs_dist: Path = _DOCS_DIST_DEFAULT
     # Dev-only auth bypass (module-dev-auth-bypass). Both default off; never
     # set in production. dev_shared_secret has NO default — an unset secret
     # is what makes HS256 rejection the safe default.

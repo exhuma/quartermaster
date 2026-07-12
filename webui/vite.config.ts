@@ -24,6 +24,11 @@ export default defineConfig({
       // webui/public — so it must be proxied in dev too, otherwise the SPA's
       // same-origin fetch would resolve against Vite's dev server and 404.
       '/changelog.json': 'http://localhost:8000',
+      // Rendered Sphinx docs site, served by the FastAPI backend at /docs from
+      // the bundled build (app/docs_site.py). Proxied so `npm run dev` can
+      // reach it when a local docs build exists; absent a build the backend
+      // simply 404s (the SPA is unaffected).
+      '/docs': 'http://localhost:8000',
       // Dev-only auth bypass endpoint (only mounted when the server has
       // DEV_AUTH_ENABLED). Scoped to /auth/dev so it never shadows the
       // SPA's own /auth/callback client route.

@@ -14,7 +14,7 @@ image**:
 
 The stdlib ships no JSON formatter, so :class:`JsonLinesFormatter` is provided
 here for operators who want one-JSON-object-per-line on disk; reference it from
-a TOML config via dictConfig's ``()`` factory key (see ``DEVELOPMENT.md``).
+a TOML config via dictConfig's ``()`` factory key (see ``docs/developer/development.md``).
 """
 
 from __future__ import annotations

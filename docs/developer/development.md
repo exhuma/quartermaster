@@ -3,7 +3,7 @@
 How to run the project locally: the FastAPI backend (MCP + REST API +
 WebDAV), the Vue web UI, and the test suites.
 
-> **Just want it running fast?** See [QUICKSTART.md](QUICKSTART.md) — server
+> **Just want it running fast?** See the [Quickstart](../user/quickstart.md) — server
 > + UI in a few minutes with no Keycloak. This document is the fuller
 > reference for day-to-day development.
 

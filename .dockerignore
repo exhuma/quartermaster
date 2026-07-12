@@ -13,3 +13,7 @@ kits/
 server/var/
 **/.env
 .claude/
+
+# The docs HTML is rendered inside the image's docs stage — never copy a local
+# build in from the context.
+docs/_build/

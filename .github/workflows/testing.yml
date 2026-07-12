@@ -58,3 +58,24 @@ jobs:
       - name: Assert no dev-auth in the production bundle
         working-directory: webui
         run: npm run check:no-dev-auth
+
+  docs:
+    name: Docs (sphinx-build -W)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      # Autodoc imports the backend package, so install its deps alongside the
+      # build-only `docs` group. --all-extras mirrors the backend job.
+      - name: Sync dependencies (docs group)
+        working-directory: server
+        run: uv sync --frozen --all-extras --group docs
+
+      # Zero-warning HTML build (-W), the same command the Docker docs stage
+      # runs, so broken references or markup fail the branch before a release.
+      - name: Build documentation
+        run: uv run --project server --group docs sphinx-build -W -b html docs docs/_build/html

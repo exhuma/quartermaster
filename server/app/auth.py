@@ -93,6 +93,11 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/healthz",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-authorization-server",
+    # Swagger UI + its schema. They live under ``/api`` (so the root ``/docs``
+    # is free for the rendered docs site) but stay public — the API contract
+    # is discoverable exactly as it was when Swagger served from ``/docs``.
+    "/api/docs",
+    "/api/openapi.json",
 })
 
 # Only data surfaces are protected: the REST API, the MCP mount, and the

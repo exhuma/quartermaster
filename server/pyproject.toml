@@ -30,7 +30,7 @@ embeddings = [
     "fastembed>=0.4",
 ]
 # OpenTelemetry metrics + traces and tiktoken token counting (see
-# docs/observability.md). Optional: without it the instrumentation code is
+# docs/operator/observability.md). Optional: without it the instrumentation code is
 # inert (no-op tracer, in-process no-op metrics) and token sizes fall back to
 # a bytes/4 estimate. The Docker image installs this extra and pre-seeds the
 # tiktoken vocab for offline use.
@@ -55,6 +55,16 @@ dev = [
     # into the root CHANGELOG.md and the served app/assets/text/changelog.json.
     # Dev/build-only — never imported at runtime; run via `task changelog`.
     "clproc>=2024",
+]
+# Documentation site toolchain (Sphinx + furo). Build-time only, never imported
+# at runtime — mirrors how `clproc` sits in the dev group. Autodoc imports the
+# `app` package, so this group is installed on top of the app's own venv (see
+# the docs stage in server/Dockerfile). Run via `task docs`.
+docs = [
+    "sphinx>=8",
+    "furo",
+    "sphinx-autodoc-typehints",
+    "myst-parser",
 ]
 
 # Scope wheel discovery to the app package explicitly. Auto-discovery would

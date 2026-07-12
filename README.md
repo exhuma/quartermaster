@@ -23,14 +23,14 @@ supplied at runtime from a separate kit-catalog checkout (dev) or a
 mounted volume (production) via the `QM_KITS_ROOT` setting. This keeps the
 releasable server image independent of any (possibly private) kit content.
 
-Running it locally? See [`DEVELOPMENT.md`](DEVELOPMENT.md).
+Running it locally? See [`DEVELOPMENT.md`](docs/developer/development.md).
 
 ---
 
 ## Quick start
 
 **Just want to try it locally, without Keycloak?** Follow
-**[QUICKSTART.md](QUICKSTART.md)** — server + web UI running in a few minutes
+**[QUICKSTART.md](docs/user/quickstart.md)** — server + web UI running in a few minutes
 using the built-in dev-auth bypass.
 
 ### Run with Docker (production-style)
@@ -66,7 +66,7 @@ The MCP endpoint is then served (authenticated) at
 `http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull a
 **channel** (`:stable`, `:beta`, `:alpha`) or a pinned version from
 `ghcr.io/exhuma/quartermaster` instead of building — see
-[RELEASING.md](RELEASING.md) for the versioning and channel scheme. For a
+[RELEASING.md](docs/operator/releasing.md) for the versioning and channel scheme. For a
 production deployment behind Traefik, see
 [Self-hosting with Docker + Traefik](#self-hosting-with-docker--traefik).
 
@@ -124,7 +124,7 @@ records the major it follows per kit in a repo-side `.quartermaster.toml` file
 (the server stays stateless about pins and never writes to your repo). Requesting
 a multi-version kit without a pin serves the earliest major plus an upgrade
 advisory the agent surfaces before writing the chosen pin. See
-[QUARTERMASTER_TOML.md](QUARTERMASTER_TOML.md) for the schema and workflow.
+[QUARTERMASTER_TOML.md](docs/user/quartermaster-toml.md) for the schema and workflow.
 
 A recurring failure mode is querying with generic or invented traits (`auth`,
 `internal-service`, or `kubernetes` as a *context*) that miss the published
@@ -146,7 +146,7 @@ intent to supported traits before selection and retry when coverage is low.
 That sentence names concepts, not tool or endpoint names, so it survives
 Quartermaster's evolution. For the rationale behind each phrase — plus a more
 explicit step-by-step block and a normalization table — see
-[AGENTS_GUIDANCE.md](AGENTS_GUIDANCE.md).
+[AGENTS_GUIDANCE.md](docs/user/downstream-agent-guidance.md).
 
 ### Architecture
 
@@ -531,9 +531,9 @@ The `docker-compose.yml` expects:
   marks the line).
 
 For running the server **and the web UI** locally, see
-[`DEVELOPMENT.md`](DEVELOPMENT.md). For running the container in production —
+[`DEVELOPMENT.md`](docs/developer/development.md). For running the container in production —
 mounts, volumes, and a staged rollout of the `resolve_kits` inference (local
-embeddings first, then an external LLM) — see [`OPERATIONS.md`](OPERATIONS.md).
+embeddings first, then an external LLM) — see [`OPERATIONS.md`](docs/operator/operations.md).
 
 ### Configuration reference
 
@@ -575,7 +575,7 @@ to `.env`, but the table below is the authoritative reference.
 | `QM_DEV_SHARED_SECRET` | No | **Dev only — never set in production.** HS256 signing secret for dev tokens. | unset (HS256 rejected) |
 | `QM_LOG_LEVEL` | No | Console log level when `QM_LOG_CONFIG` is unset. | `INFO` |
 | `QM_LOG_CONFIG` | No | Path to a TOML `dictConfig` file for full logging control. | unset (colored console) |
-| `QM_METRICS_PROMETHEUS_ENABLED` | No | Mount a Prometheus `GET /metrics` pull endpoint (needs the `telemetry` extra). OTLP push uses the standard `OTEL_*` env vars. See [OBSERVABILITY.md](OBSERVABILITY.md). | `false` |
+| `QM_METRICS_PROMETHEUS_ENABLED` | No | Mount a Prometheus `GET /metrics` pull endpoint (needs the `telemetry` extra). OTLP push uses the standard `OTEL_*` env vars. See [OBSERVABILITY.md](docs/operator/observability.md). | `false` |
 | `QM_METRICS_ALLOW_ANONYMOUS` | No | Serve `/metrics` without auth. When false it requires app-token Basic (the `/dav` token); set true only when isolated at the network layer. | `false` |
 | `QM_METRICS_SECTION_LEVEL` | No | Emit per-section delivery metrics (`qm.section.deliveries`); higher cardinality. | `false` |
 
@@ -625,7 +625,7 @@ recorded in each kit's `CHANGELOG.md` without creating a new folder. Use
 versions and whether the change affects end-users.
 
 For the full kit structure, metadata schema, and versioning rules, see
-[`AUTHORING_KITS.md`](AUTHORING_KITS.md).
+[`AUTHORING_KITS.md`](docs/developer/authoring-kits.md).
 
 ---
 
