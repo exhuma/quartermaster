@@ -5,3 +5,6 @@
 # Rendered Sphinx documentation (see `task docs`). Built fresh locally and in
 # the Docker docs stage — never committed.
 docs/_build/
+
+# graphify knowledge-graph output — local analysis artifact, never committed.
+graphify-out/
