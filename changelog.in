@@ -21,9 +21,11 @@
 #---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
-2026.7.11     ; added    ; [UI] Public pre-login landing page                                               ;        ;   ;   ; A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
-2026.7.11     ; changed  ; [UI] Tactical navy/brass redesign with light and dark theming                    ;        ;   ;   ; The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
-2026.7.11     ; added    ; [MCP] Per-repo kit version pinning via a repo-side `.quartermaster.toml`          ;        ;   ; x ; A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
+
+# --- 2026.7.12 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.12a1   ; added    ; [UI] Public pre-login landing page                                               ;        ;   ;   ; A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
+2026.7.12a1   ; changed  ; [UI] Tactical navy/brass redesign with light and dark theming                    ;        ;   ;   ; The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
+2026.7.12a1   ; added    ; [MCP] Per-repo kit version pinning via a repo-side `.quartermaster.toml`          ;        ;   ; x ; A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
 
 # --- 2026.7.4 ------------------------------------------------------------------------------------------------------------------------------------------------------
 2026.7.4a1    ; added    ; [MCP] MCP prompt templates bundled as package markdown                           ;        ;   ;   ; The canned MCP prompts are now maintained as bundled markdown templates rather than inline strings, so the prompt text delivered to clients is easier to review and extend.

@@ -1,21 +1,30 @@
 # Changelog
 
 
-## Release 2026.7.11
+## Release 2026.7.12 (2026-07-12)
+
+A public pre-login landing page and a tactical navy/brass redesign 
+make
+the web UI legible before sign-in, and repositories can now pin 
+the kit
+version they expect via a repo-side `.quartermaster.toml`.
+
+
 
 ### Added
 - ☆ **[MCP] Per-repo kit version pinning via a repo-side
-  `.quartermaster.toml`**
+  `.quartermaster.toml`** *@ 2026.7.12a1*
 
   A repository can pin the kit version it expects in a `.quartermaster.toml`. Then `resolve_kits`/`get_kit` honour that pin so a repo stays on a known kit revision.
 
-- [UI] Public pre-login landing page
+- [UI] Public pre-login landing page *@ 2026.7.12a1*
 
   A public landing page now greets visitors before sign-in, so the product is legible without authenticating first.
 
 
 ### Changed
-- [UI] Tactical navy/brass redesign with light and dark theming
+- [UI] Tactical navy/brass redesign with light and dark theming *@
+  2026.7.12a1*
 
   The web UI was restyled with a coherent navy/brass palette across both the light and dark Vuetify themes.
 
