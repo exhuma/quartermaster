@@ -55,9 +55,18 @@ def test_changelog_shape(monkeypatch, tmp_path) -> None:
         assert {"version", "date", "notes"} <= release["meta"].keys()
         for log in release["logs"]:
             assert {"subject", "type", "is_highlight"} <= log.keys()
-    # The newest (unreleased) group carries a null date; at least one entry is
-    # flagged as a highlight (the important MCP-behaviour milestones).
-    assert body[0]["meta"]["date"] is None
+    # Undated (unreleased) groups, when present, always sort ahead of dated
+    # releases: once a dated release appears every following group is dated
+    # too. A freshly-cut release may leave no unreleased group at all, so the
+    # newest group is not required to be undated.
+    seen_dated = False
+    for release in body:
+        if release["meta"]["date"] is None:
+            assert not seen_dated, "an undated group must precede all dated releases"
+        else:
+            seen_dated = True
+    # At least one entry is flagged as a highlight (the important MCP-behaviour
+    # milestones).
     assert any(
         log["is_highlight"] for release in body for log in release["logs"]
     )

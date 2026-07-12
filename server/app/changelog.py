@@ -14,7 +14,9 @@ The rendered shape is a JSON array of releases, newest first::
                      "is_internal", "issue_ids", "issue_urls", ... } ],
         "meta": { "version", "date", "notes" } }, ... ]
 
-``meta.date`` is ``null`` for the not-yet-tagged (unreleased) group.
+``meta.date`` is ``null`` for a not-yet-tagged (unreleased) group; such
+groups, when present, always sort ahead of the dated releases. A freshly-cut
+release may leave no unreleased group at all.
 """
 
 from __future__ import annotations
