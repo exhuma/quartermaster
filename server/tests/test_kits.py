@@ -223,6 +223,27 @@ def kit_root_with_broken_manifest(kit_root: Path) -> Path:
     return kit_root
 
 
+@pytest.fixture()
+def kit_root_with_broken_index(kit_root: Path) -> Path:
+    """A kit root where one kit's index.toml references a missing file."""
+    index = kit_root / "kit-beta" / "v1" / "instructions" / "index.toml"
+    index.write_text(
+        'summary = "Beta summary."\n\n'
+        "[[sections]]\n"
+        'file = "overview.md"\n'
+        'title = "Overview"\n'
+        'gloss = "g"\n'
+        "always_load = false\n\n"
+        "[[sections]]\n"
+        'file = "gone.md"\n'  # references a section file that does not exist
+        'title = "Gone"\n'
+        'gloss = "g"\n'
+        "always_load = false\n",
+        encoding="utf-8",
+    )
+    return kit_root
+
+
 # ---------------------------------------------------------------------------
 # _load_kit_index
 # ---------------------------------------------------------------------------
@@ -363,6 +384,49 @@ def test_list_all_kits_description_from_latest(
     )
     alpha = next(k for k in list_all_kits() if k.name == "kit-alpha")
     assert alpha.description == "Alpha v2 summary."
+
+
+def test_list_all_kits_flags_broken_index_without_crashing(
+    kit_root_with_broken_index: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A single malformed kit index must not abort the whole catalog: the good
+    # kit still loads, and the bad one is returned flagged as broken.
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": kit_root_with_broken_index})(),
+    )
+    kits = list_all_kits()
+    by_name = {k.name: k for k in kits}
+    assert "kit-alpha" in by_name and "kit-beta" in by_name
+
+    alpha = by_name["kit-alpha"]
+    assert alpha.broken is False and alpha.error is None
+
+    beta = by_name["kit-beta"]
+    assert beta.broken is True
+    assert beta.error and "gone" in beta.error
+    # Path-derived metadata still populated for the broken kit.
+    assert beta.versions == ["v1"]
+    assert beta.latest_version == "v1"
+
+
+def test_broken_kit_excluded_from_selection(
+    kit_root_with_broken_index: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The broken kit must never be offered to the selector/resolver, but the
+    # catalog scan itself must not raise.
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": kit_root_with_broken_index})(),
+    )
+    entries, warnings = _catalog_entries()
+    entry_names = [info.name for info, _ in entries]
+    assert "kit-alpha" in entry_names
+    assert "kit-beta" not in entry_names
+    assert any(w["kit"] == "kit-beta" for w in warnings)
+
+    catalog = list_catalog_v2()
+    assert all(c["name"] != "kit-beta" for c in catalog)
 
 
 # ---------------------------------------------------------------------------

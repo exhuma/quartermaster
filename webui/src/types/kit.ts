@@ -7,6 +7,10 @@ export interface KitInfo {
   versions: string[]
   latest_version: string
   source_layer: string | null
+  // Set when the kit's index is malformed: the kit is listed but flagged so it
+  // can be surfaced and fixed (see app/kits.py list_all_kits).
+  broken?: boolean
+  error?: string | null
 }
 
 export interface KitDetail {

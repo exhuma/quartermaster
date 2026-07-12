@@ -99,6 +99,8 @@ def list_private_kits(request: Request) -> list[dict[str, Any]]:
             "description": k.description,
             "versions": k.versions,
             "latest_version": k.latest_version,
+            "broken": k.broken,
+            "error": k.error,
         }
         for k in kits
     ]

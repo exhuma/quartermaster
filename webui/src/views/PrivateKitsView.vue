@@ -73,7 +73,28 @@ async function confirmDelete(): Promise<void> {
     />
 
     <v-card>
-      <v-data-table :headers="headers" :items="kits" item-value="name">
+      <v-data-table
+        :headers="headers"
+        :items="kits"
+        item-value="name"
+        :row-props="(d) => ({ class: d.item.broken ? 'broken-row' : '' })"
+      >
+        <template #item.name="{ item }">
+          <span
+            v-if="item.broken"
+            class="d-inline-flex align-center text-error"
+          >
+            <v-icon size="small" class="mr-1">mdi-alert</v-icon>
+            {{ item.name }}
+          </span>
+          <span v-else>{{ item.name }}</span>
+        </template>
+        <template #item.description="{ item }">
+          <span v-if="item.broken" class="text-error">
+            {{ item.error || 'Kit is broken and cannot be loaded.' }}
+          </span>
+          <span v-else>{{ item.description }}</span>
+        </template>
         <template #item.versions="{ item }">
           <v-chip
             v-for="v in item.versions"
@@ -147,3 +168,9 @@ async function confirmDelete(): Promise<void> {
     </v-dialog>
   </v-container>
 </template>
+
+<style scoped>
+:deep(.broken-row) {
+  background-color: rgba(var(--v-theme-error), 0.08);
+}
+</style>

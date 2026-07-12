@@ -85,14 +85,35 @@ async function confirmDelete(): Promise<void> {
     />
 
     <v-card>
-      <v-data-table :headers="headers" :items="kits" item-value="name">
+      <v-data-table
+        :headers="headers"
+        :items="kits"
+        item-value="name"
+        :row-props="(d) => ({ class: d.item.broken ? 'broken-row' : '' })"
+      >
         <template #item.name="{ item }">
+          <!-- A broken kit's detail page (read_kit_outline) would itself error,
+               so render the name as plain text rather than a link. -->
+          <span
+            v-if="item.broken"
+            class="font-weight-medium d-inline-flex align-center text-error"
+          >
+            <v-icon size="small" class="mr-1">mdi-alert</v-icon>
+            {{ item.name }}
+          </span>
           <router-link
+            v-else
             class="text-primary font-weight-medium"
             :to="{ name: 'kit-detail', params: { name: item.name } }"
           >
             {{ item.name }}
           </router-link>
+        </template>
+        <template #item.description="{ item }">
+          <span v-if="item.broken" class="text-error">
+            {{ item.error || 'Kit is broken and cannot be loaded.' }}
+          </span>
+          <span v-else>{{ item.description }}</span>
         </template>
         <template #item.source_layer="{ item }">
           <StatusChip v-if="item.source_layer" :label="item.source_layer" />
@@ -167,3 +188,9 @@ async function confirmDelete(): Promise<void> {
     </v-dialog>
   </v-container>
 </template>
+
+<style scoped>
+:deep(.broken-row) {
+  background-color: rgba(var(--v-theme-error), 0.08);
+}
+</style>

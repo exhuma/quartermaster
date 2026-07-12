@@ -169,6 +169,10 @@ class KitInfo:
     :param source_layer: Name of the layer that owns this kit (the
         highest-priority layer containing it). ``None`` in legacy
         single-root usage.
+    :param broken: True when the kit's ``instructions/index.toml`` is missing
+        or malformed. A broken kit is still listed (so it can be surfaced and
+        fixed) but is excluded from selection/serving.
+    :param error: Human-readable reason the kit is broken, or ``None``.
     """
 
     name: str
@@ -176,6 +180,8 @@ class KitInfo:
     versions: list[str]
     latest_version: str
     source_layer: str | None = None
+    broken: bool = False
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -874,6 +880,18 @@ def _catalog_entries(
     layers = _caller_layers(subject)
     layer_by_name = {layer.name: layer for layer in layers}
     for info in list_all_kits(subject=subject):
+        # A kit with a broken index cannot be served, so it must never be
+        # offered to the selector/resolver — record it and skip.
+        if info.broken:
+            if strict:
+                raise ValueError(
+                    f"kit {info.name!r} has an invalid index: {info.error}"
+                )
+            warnings.append({
+                "kit": info.name,
+                "error": info.error or "invalid kit index",
+            })
+            continue
         # Resolve the kit's owning layer root from the source_layer tag
         layer = layer_by_name.get(info.source_layer or "")
         if layer is None:
@@ -1039,16 +1057,34 @@ def list_all_kits(subject: Any = _CTX_SUBJECT) -> list[KitInfo]:
     for name, versions_with_src in _kit_version_paths_layered(layers).items():
         latest = max(versions_with_src, key=_version_key)
         index_path, _layer_root, layer_name = versions_with_src[latest]
-        index = _load_kit_index(index_path, name)
-        kits.append(
-            KitInfo(
-                name=name,
-                description=index.summary,
-                versions=list(versions_with_src.keys()),
-                latest_version=latest,
-                source_layer=layer_name,
+        # A single malformed kit must not abort the whole catalog: flag it as
+        # broken (with the reason) and keep going, mirroring the resilience
+        # pattern in ``_catalog_entries``. Version/name/layer come from the path
+        # scan, so a broken kit still lists its versions.
+        try:
+            index = _load_kit_index(index_path, name)
+            kits.append(
+                KitInfo(
+                    name=name,
+                    description=index.summary,
+                    versions=list(versions_with_src.keys()),
+                    latest_version=latest,
+                    source_layer=layer_name,
+                )
             )
-        )
+        except (ValueError, OSError) as exc:
+            logger.warning("kit %r has an invalid index: %s", name, exc)
+            kits.append(
+                KitInfo(
+                    name=name,
+                    description="",
+                    versions=list(versions_with_src.keys()),
+                    latest_version=latest,
+                    source_layer=layer_name,
+                    broken=True,
+                    error=str(exc),
+                )
+            )
     return kits
 
 

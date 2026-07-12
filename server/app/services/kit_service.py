@@ -215,8 +215,8 @@ def list_kits() -> list[dict[str, Any]]:
     """
     List all kits with compact metadata.
 
-    :returns: List of
-        ``{name, description, versions, latest_version, source_layer}``.
+    :returns: List of ``{name, description, versions, latest_version,
+        source_layer, broken, error}``.
     """
     return [
         {
@@ -225,6 +225,8 @@ def list_kits() -> list[dict[str, Any]]:
             "versions": kit.versions,
             "latest_version": kit.latest_version,
             "source_layer": kit.source_layer,
+            "broken": kit.broken,
+            "error": kit.error,
         }
         for kit in kits_mod.list_all_kits()
     ]
