@@ -188,3 +188,24 @@ def test_render_diff_smoke(eval_catalog: Path) -> None:
     render_diff(diff, console)
     text = console.file.getvalue()
     assert "candidate" in text
+
+
+def test_cli_warns_about_model_load_on_non_tty(
+    eval_catalog: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # In a non-TTY run the rich spinner is disabled, so the CLI must still
+    # announce the model-load pause — on stderr, leaving stdout's report clean.
+    from app.eval import __main__ as cli
+
+    monkeypatch.setattr("sys.stderr.isatty", lambda: False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+    cli.main(["--cases", "catalog"])
+
+    captured = capsys.readouterr()
+    assert "first run may take a while" in captured.err
+    assert "first run may take a while" not in captured.out
+    # stdout still carries the plain-text report, uncorrupted by the notice.
+    assert "KIT-RESOLUTION EVAL" in captured.out

@@ -45,6 +45,10 @@ or drop them if you want to give the run full power. In a terminal the CLI shows
 a live progress bar during the run and a summary report at the end; when its
 output is piped or redirected it falls back to plain text.
 
+The **first case** pays a one-time cost: loading the embedding model into
+memory, which can take tens of seconds before the progress bar starts moving.
+That pause is the model warming up, not a hang — later cases are fast.
+
 Useful flags:
 
 - `--cases {catalog,authored,all}` — which probes to run (default `all`).
@@ -89,6 +93,16 @@ Each section names a distinct failure mode.
   trait was inferred across the probes that forbade it.
 - **Engine drift / non-determinism** — probes where inference did not use the
   embedding engine, or where repeated runs disagreed.
+
+Not every finding fails a case. Only `missing-kit`, `forbidden-kit`,
+`contamination`, and `engine-drift` are fatal. A `recall-miss` (an expected
+trait was not inferred) and non-determinism are **advisory** — a `recall-miss`
+often *contributes* to a `missing-kit` but is not itself a failure. When
+triaging, fix confirmed false-exclusions and runaway traits first, then
+`missing-kit`, then contamination and interference; read `recall-miss` as a
+clue, not a task. The false-exclusion and interference tables matter even when
+every case passes: they reveal kits that are silently unreachable or that
+shadow a sibling.
 
 (eval-cases)=
 

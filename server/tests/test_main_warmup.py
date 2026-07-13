@@ -42,3 +42,20 @@ def test_warm_embeddings_swallows_errors(
 
     # Must not raise: a warmup failure cannot block startup.
     main._warm_embeddings()
+
+
+def test_warm_embeddings_announces_start_before_completion(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A "starting" line must precede the completion line, so the container log
+    # marks the wait rather than only announcing it after it finishes.
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("app.embeddings.warm_up", lambda _s: True)
+
+    with caplog.at_level("INFO", logger=main.logger.name):
+        main._warm_embeddings()
+
+    messages = [r.message for r in caplog.records]
+    start = next(i for i, m in enumerate(messages) if "warming embedding" in m)
+    done = next(i for i, m in enumerate(messages) if "warmed at startup" in m)
+    assert start < done

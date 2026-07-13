@@ -196,6 +196,9 @@ def _warm_embeddings() -> None:
     from app import embeddings
 
     try:
+        logger.info(
+            "warming embedding model at startup; this may take a while…"
+        )
         if embeddings.warm_up(get_settings()):
             logger.info("embedding model warmed at startup")
     except Exception:  # noqa: BLE001 - warmup must not block startup

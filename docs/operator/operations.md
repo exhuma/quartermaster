@@ -154,6 +154,13 @@ Operational signals:
 > `resolve_kits` after a fresh deploy only pays the in-process model *load*, not
 > a download. Do not point `QM_EMBEDDINGS_CACHE_DIR` at the `/data` volume — a
 > bind mount there masks the baked model and reintroduces a download.
+>
+> That model *load* still costs a few seconds, and the server pays it **during
+> startup** — it warms the model before reporting ready, so no user request eats
+> the delay. Expect the container to sit briefly between the
+> `warming embedding model at startup; this may take a while…` log line and the
+> `embedding model warmed at startup` line that confirms it finished; that gap
+> is normal, not a stuck boot.
 
 ---
 

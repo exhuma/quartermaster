@@ -90,6 +90,16 @@ def main(argv: list[str] | None = None) -> int:
             task_id, description="Evaluating cases", total=total, completed=done
         )
 
+    # When stderr is not a terminal the spinner is disabled, so give a plain
+    # one-line heads-up: the first case loads the embedding model, which can
+    # take tens of seconds. To stderr, so stdout (report / JSON) stays clean.
+    if not sys.stderr.isatty():
+        print(
+            "Loading catalog & embedding model (first run may take a while)…",
+            file=sys.stderr,
+            flush=True,
+        )
+
     with progress:
         report = run_resolution_eval(
             which=args.cases, limit=args.limit, on_progress=on_progress

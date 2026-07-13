@@ -86,3 +86,11 @@ upgrade, then write the chosen major back to `.quartermaster.toml`. A pin only
 constrains a kit's *version*, never which kits are selected, so it stays
 compatible with per-task `resolve_kits`. Fetch the `quartermaster_pin_file`
 prompt (`list_prompts` → `get_prompt`) for the canonical schema and workflow.
+
+**Authoring or editing kits? Evaluate how the catalog resolves.** If the user
+is writing or changing kits (not just consuming them), fetch the
+`catalog_evaluation` prompt (`list_prompts` → `get_prompt`). It is a runbook
+for running the evaluation **locally** against the author's own kit folder —
+including not-yet-deployed kits, via `docker run` — and for interpreting the
+report so you can explain the findings and propose manifest fixes. Do this
+whenever the user asks to check, measure, or improve kit resolution.
