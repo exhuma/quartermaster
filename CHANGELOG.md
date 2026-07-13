@@ -28,6 +28,16 @@ REST endpoint.
 
 
 ### Changed
+- [Ops] Embedding-model warmup is announced instead of looking like a
+  hang *@ 2026.7.13a3*
+
+  The server logs a "warming embedding model at startup" line before the blocking startup warmup (paired with the existing completion line), and the evaluation CLI prints a one-time model-load notice on non-terminal runs. Neither the container boot nor a piped eval run now goes silent while the model loads.
+
+- [MCP] Agents can now run and explain the catalog evaluation for kit
+  authors *@ 2026.7.13a3*
+
+  The server instructions point kit authors at the `catalog_evaluation` prompt, and that runbook now carries a full interpretation guide — which findings fail a case versus which are advisory, the confirmed-spurious and runaway-trait nuance, a triage order, and a per-finding fix map. A coding agent with Quartermaster registered can discover the runbook, run the evaluation locally against the author's own kit folder, and explain the report with concrete manifest fixes rather than only naming sections.
+
 - [Ops] Progress feedback and resource guidance for the
   catalog-evaluation CLI *@ 2026.7.13a2*
 
