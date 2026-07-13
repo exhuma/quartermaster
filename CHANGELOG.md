@@ -27,6 +27,13 @@ REST endpoint.
   `POST /api/eval/resolution` starts an evaluation run and `GET /api/eval/resolution/{id}` polls it for the scored report: failing cases, false-exclusions, cross-kit interference, and trait contamination.
 
 
+### Changed
+- [Ops] Progress feedback and resource guidance for the
+  catalog-evaluation CLI *@ 2026.7.13a2*
+
+  `python -m app.eval` now shows a live progress bar while it runs and a prettified summary report at the end when run in a terminal (piped output stays plain text). The documented container command caps the resource-heavy run with `--cpus 2 --memory 2g`, which you can drop for full power.
+
+
 ## Release 2026.7.12 (2026-07-12)
 
 A public pre-login landing page and a tactical navy/brass redesign 

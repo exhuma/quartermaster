@@ -23,6 +23,7 @@
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
 
 # --- 2026.7.13 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.13a2   ; changed  ; [Ops] Progress feedback and resource guidance for the catalog-evaluation CLI      ;        ;   ;   ; `python -m app.eval` now shows a live progress bar while it runs and a prettified summary report at the end when run in a terminal (piped output stays plain text). The documented container command caps the resource-heavy run with `--cpus 2 --memory 2g`, which you can drop for full power.
 2026.7.13a1   ; added    ; [MCP] Kit-catalog resolution evaluation for authors                               ;        ;   ; x ; Kit authors can measure how well a catalog resolves — per-kit coverage, false-exclusions (a kit silently dropped when an over-inferred trait matches its `excludes`), and cross-kit interference — over any kit folder, including not-yet-deployed kits in any domain. Exposed through the `evaluate_catalog` MCP tool and the domain-agnostic `catalog_evaluation` prompt.
 2026.7.13a1   ; added    ; [API] Asynchronous catalog-evaluation endpoint                                    ;        ;   ;   ; `POST /api/eval/resolution` starts an evaluation run and `GET /api/eval/resolution/{id}` polls it for the scored report: failing cases, false-exclusions, cross-kit interference, and trait contamination.
 
