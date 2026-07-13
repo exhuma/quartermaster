@@ -1,10 +1,21 @@
 # Authoring kits
 
 A **kit** is a versioned, agent-facing guide plus the metadata Quartermaster
-uses to discover, rank, and serve it. Kits live in your **kit-catalog repo**
-(not here) — the directory `QM_KITS_ROOT` points at. Quartermaster validates
-every kit on load and on write, so a malformed kit is rejected rather than
-served.
+uses to discover, rank, and serve it. Kits live in the **catalog** an instance
+serves — the directory its `QM_KITS_ROOT` points at — never inside a target
+project.
+
+You author against a running instance in one of two ways, whichever suits you:
+
+- **Mount the catalog as a drive** over the instance's `/dav` endpoint (get a
+  mount token from the web UI's **Mount** page) and edit kits with your usual
+  tools or a coding agent; writes are visible to the server immediately.
+- **Edit the kit-catalog repository** directly, if you have access to the
+  checkout the instance serves.
+
+Either way Quartermaster validates every kit on load and on write, so a
+malformed kit is rejected rather than served (see [Validate before you
+ship](#validate-before-you-ship)).
 
 ## Layout
 

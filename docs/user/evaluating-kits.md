@@ -110,10 +110,13 @@ cases:
     kits_include: [kit-cakes]
 ```
 
-Every field except `task` is optional. Traits are grouped by the four
-categories — `languages`, `frameworks`, `capabilities`, `contexts` — and you use
-whichever your kits actually declare. Run authored cases alone with
-`--cases authored`, or together with the per-kit probes using `--cases all`.
+Every field except `task` is optional. The `include`/`forbid` maps are keyed by
+trait category. Quartermaster's four categories are fixed: `capabilities` and
+`contexts` suit any domain, while `languages` and `frameworks` are
+software-oriented and simply left empty by non-software catalogs. Key each
+entry under whichever categories your kits actually declare. Run authored cases
+alone with `--cases authored`, or together with the per-kit probes using
+`--cases all`.
 
 ## How authors use it
 

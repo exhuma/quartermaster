@@ -5,7 +5,7 @@ This page explains the guidance you should put in a repository's `AGENTS.md`
 Quartermaster *reliably* and *token-efficiently*.
 
 It is **not** about authoring kits (see
-[Authoring kits](../developer/authoring-kits.md)) or about working inside this
+[Authoring kits](authoring-kits.md)) or about working inside this
 server's own codebase (see
 [`.ai/rules.md`](https://github.com/exhuma/quartermaster/blob/main/.ai/rules.md)). It is the short briefing a downstream project
 gives its agents so they drive Quartermaster well.
@@ -46,7 +46,10 @@ advertised vocabulary as authoritative is the single highest-leverage habit.
 Users describe intent in their own words: "a REST API", "deployed on k8s",
 "needs login", "with logging". None of those are guaranteed to be trait values.
 The agent's job is to *normalize* each concern onto a supported trait before
-calling `select_kits` — for example:
+calling `select_kits`. The table below is an example against a **software**
+catalog; the technique is domain-agnostic — whatever the catalog's domain,
+normalize each concern onto a trait the catalog actually *publishes* (via
+`list_available_traits`):
 
 | User says…            | Normalizes to…                                          |
 |-----------------------|---------------------------------------------------------|

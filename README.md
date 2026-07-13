@@ -29,9 +29,9 @@ Running it locally? See [`DEVELOPMENT.md`](docs/developer/development.md).
 
 ## Quick start
 
-**Just want to try it locally, without Keycloak?** Follow
-**[QUICKSTART.md](docs/user/quickstart.md)** — server + web UI running in a few minutes
-using the built-in dev-auth bypass.
+**Just want to try it locally, without Keycloak?** Follow the
+**[Fast start](docs/developer/development.md#fast-start-no-keycloak)** — server +
+web UI running in a few minutes using the built-in dev-auth bypass.
 
 ### Run with Docker (production-style)
 
@@ -66,7 +66,7 @@ The MCP endpoint is then served (authenticated) at
 `http://localhost:8000/kits/mcp`. Prefer the prebuilt image? Pull a
 **channel** (`:stable`, `:beta`, `:alpha`) or a pinned version from
 `ghcr.io/exhuma/quartermaster` instead of building — see
-[RELEASING.md](docs/operator/releasing.md) for the versioning and channel scheme. For a
+[RELEASING.md](docs/developer/releasing.md) for the versioning and channel scheme. For a
 production deployment behind Traefik, see
 [Self-hosting with Docker + Traefik](#self-hosting-with-docker--traefik).
 
@@ -625,7 +625,7 @@ recorded in each kit's `CHANGELOG.md` without creating a new folder. Use
 versions and whether the change affects end-users.
 
 For the full kit structure, metadata schema, and versioning rules, see
-[`AUTHORING_KITS.md`](docs/developer/authoring-kits.md).
+[`AUTHORING_KITS.md`](docs/user/authoring-kits.md).
 
 ---
 

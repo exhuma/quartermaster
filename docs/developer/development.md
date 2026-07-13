@@ -3,9 +3,59 @@
 How to run the project locally: the FastAPI backend (MCP + REST API +
 WebDAV), the Vue web UI, and the test suites.
 
-> **Just want it running fast?** See the [Quickstart](../user/quickstart.md) — server
-> + UI in a few minutes with no Keycloak. This document is the fuller
-> reference for day-to-day development.
+## Fast start (no Keycloak)
+
+If you have [`task`](https://taskfile.dev) installed, `task setup && task run`
+boots the backend and web UI together with the [dev-auth
+bypass](#dev-auth-bypass-no-keycloak) already enabled — no manual env editing
+and no Keycloak. The rest of this document is the fuller reference behind that
+shortcut.
+
+The server serves kits from a directory (`QM_KITS_ROOT`) and is not bundled
+with one, so create a throwaway catalog with a single example kit first. Drop
+it into `server/var/kits/` (the path `task run` uses):
+
+```bash
+KIT=server/var/kits/hello-kit
+mkdir -p "$KIT/v1/instructions"
+
+cat > "$KIT/applicability.json" <<'JSON'
+{
+  "kit_type": "module",
+  "summary": "A minimal example kit for trying out Quartermaster.",
+  "domains": ["example"], "languages": [], "frameworks": [], "contexts": [],
+  "requires": { "languages": [], "frameworks": [], "capabilities": [], "contexts": [] },
+  "excludes": { "languages": [], "frameworks": [], "capabilities": [], "contexts": [] },
+  "optional_signals": ["demo"], "related_kits": [], "priority": 10
+}
+JSON
+
+cat > "$KIT/CHANGELOG.md" <<'MD'
+# Changelog
+## v1.0.0
+- Initial example kit.
+MD
+
+cat > "$KIT/v1/instructions/index.toml" <<'TOML'
+summary = "A minimal example kit demonstrating the section format."
+
+[[sections]]
+file = "invariant.md"
+title = "Invariants"
+gloss = "The one rule this example kit teaches."
+always_load = true
+TOML
+
+cat > "$KIT/v1/instructions/invariant.md" <<'MD'
+# Invariants
+- This is a demo kit. Replace it with your own — see the kit-authoring guide.
+MD
+```
+
+Then `task setup && task run` and open <http://localhost:5173>: you are
+auto-logged-in (no Keycloak) and the kit list shows **hello-kit**. Authoring
+real kits is covered in [Authoring kits](../user/authoring-kits.md). The
+manual, Task-free equivalents are the sections below.
 
 ## Prerequisites
 

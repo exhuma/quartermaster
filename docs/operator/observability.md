@@ -65,15 +65,11 @@ The bundle is served read-only at `GET /api/metrics/overview?window=24h|7d|30d`
 
 ## 1. Setup
 
-Install the optional extra (bundled in the Docker image) and OpenTelemetry +
-`tiktoken` come with it:
-
-```bash
-pip install '.[telemetry]'
-```
-
-Without the extra the server still runs: traces are no-ops, metrics use a no-op
-meter, and token sizes fall back to a `bytes / 4` estimate.
+The published image bundles the telemetry stack (OpenTelemetry + `tiktoken`), so
+there is nothing to install — configure the exporters below and metrics and
+traces start flowing. On an image built without it the server still runs, but
+traces are no-ops, metrics use a no-op meter, and token sizes fall back to a
+`bytes / 4` estimate.
 
 ### Export to an OTLP collector (push)
 

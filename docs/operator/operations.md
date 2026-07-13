@@ -14,8 +14,8 @@ the operational view: what to mount, what to set, and how to verify.
 ## 1. What you are running
 
 - A single image: the FastAPI + FastMCP server **plus** the built web UI.
-  Pull `ghcr.io/exhuma/quartermaster` (channels `:stable`/`:beta`/`:alpha`,
-  or a pinned version) or build it: `docker build -f server/Dockerfile . -t quartermaster`.
+  Pull `ghcr.io/exhuma/quartermaster` — track a channel
+  (`:stable`/`:beta`/`:alpha`) or pin an immutable version.
 - Listens on **port 8000** (HTTP). Put TLS in front of it (Traefik, nginx,
   a cloud LB). **Auth terminates inside the app** (Keycloak JWT), not at the
   proxy — the proxy only needs to terminate TLS and route the host.
@@ -92,13 +92,10 @@ This is the recommended first deployment of the new `resolve_kits` tool: a
 **local embedding model**, no external services, fully self-hosted. It is on
 by default and needs no setup — the model is baked into the image.
 
-> Requires an image built with the `embeddings` extra (this feature version or
-> newer — the stock `server/Dockerfile` includes it **and bakes the embedding
-> model into the image at build time**, so first use needs no network egress
-> and no writable cache volume). On an image without it, the server silently
-> degrades to the lexical floor; rebuild from this repo
-> (`docker build -f server/Dockerfile . -t quartermaster`) or pull a version
-> that ships it.
+> The published image bakes in the embedding model, so first use needs no
+> network egress and no writable cache volume. An older image that predates this
+> feature silently degrades to the lexical floor — pull a version that ships it
+> (this feature version or newer).
 
 ### Settings
 
@@ -225,11 +222,9 @@ Call `resolve_kits` again and check the `engine` field:
 
 ## 6. Compose
 
-The repo ships [`server/docker-compose.yml`](https://github.com/exhuma/quartermaster/blob/main/server/docker-compose.yml) for a
-Traefik v3 front end. To enable the inference stages, add the relevant
-variables to your `.env` (copy from
-[`server/.env.example`](https://github.com/exhuma/quartermaster/blob/main/server/.env.example), which has an annotated
-*"server-side inference"* section):
+A Compose service behind a Traefik v3 front end looks like the following. The
+required and inference variables are the ones tabulated in §2–§5; set them in
+your `.env`:
 
 ```yaml
 services:

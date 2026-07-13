@@ -6,7 +6,7 @@ tasks through the real resolver path and scores the outcome, so kit authors can
 judge coverage and hit rate, spot kits that get silently excluded by
 over-inferred traits, and see one kit displacing another.
 
-> **Author guide:** [`docs/developer/evaluating-kits.md`](../../../docs/developer/evaluating-kits.md)
+> **Author guide:** [`docs/user/evaluating-kits.md`](../../../docs/user/evaluating-kits.md)
 > is the authoritative, task-oriented documentation. This README is a
 > code-level quick reference.
 

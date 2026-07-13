@@ -1,13 +1,13 @@
 # Operators
 
-Deploying, observing, and releasing the hosted Quartermaster service.
+Deploying and observing the hosted Quartermaster service — running the
+published container image. You do not build or release the image; you pull a
+published one and run it.
 
 - **[Operations](operations.md)** — the production deployment and runbook: what
   to mount, what to set, and how to verify.
 - **[Observability](observability.md)** — metrics, traces, KPIs, and the
   suggested Grafana dashboard.
-- **[Releasing](releasing.md)** — the CalVer-tag-driven release process and
-  cascading channel pointers.
 
 ```{toctree}
 :hidden:
@@ -15,5 +15,4 @@ Deploying, observing, and releasing the hosted Quartermaster service.
 
 operations
 observability
-releasing
 ```
