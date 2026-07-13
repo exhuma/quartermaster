@@ -44,6 +44,13 @@ REST endpoint.
   `python -m app.eval` now shows a live progress bar while it runs and a prettified summary report at the end when run in a terminal (piped output stays plain text). The documented container command caps the resource-heavy run with `--cpus 2 --memory 2g`, which you can drop for full power.
 
 
+### Fixed
+- [MCP] Catalog-evaluation runbook drives docker instead of assuming
+  local Python *@ 2026.7.13a4*
+
+  The `catalog_evaluation` prompt now leads with the published container image (`docker run … ghcr.io/exhuma/quartermaster:alpha python -m app.eval`) so an agent whose environment has no Python or Quartermaster checkout can actually run the evaluation, with the direct-Python command kept only as a source-checkout fallback. The image tag is baked to match the release channel the docs and prompt ship in, and the same broken image reference in the evaluating-kits guide was corrected.
+
+
 ## Release 2026.7.12 (2026-07-12)
 
 A public pre-login landing page and a tactical navy/brass redesign 
