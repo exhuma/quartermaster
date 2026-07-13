@@ -9,6 +9,14 @@ meta:
   version: "1.0"
 
 releases:
+  "2026.7.13":
+    date: 2026-07-13
+    notes: |
+      Kit authors can now evaluate how well a catalog resolves — measuring
+      per-kit coverage, false-exclusions, and cross-kit interference — over any
+      kit folder, including kits that are not yet deployed. The evaluation works
+      for any domain and is available as a local CLI, an `evaluate_catalog` MCP
+      tool, a bundled prompt, and an asynchronous REST endpoint.
   "2026.7.12":
     date: 2026-07-12
     notes: |

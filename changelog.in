@@ -22,6 +22,10 @@
 
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
 
+# --- 2026.7.13 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.13a1   ; added    ; [MCP] Kit-catalog resolution evaluation for authors                               ;        ;   ; x ; Kit authors can measure how well a catalog resolves — per-kit coverage, false-exclusions (a kit silently dropped when an over-inferred trait matches its `excludes`), and cross-kit interference — over any kit folder, including not-yet-deployed kits in any domain. Exposed through the `evaluate_catalog` MCP tool and the domain-agnostic `catalog_evaluation` prompt.
+2026.7.13a1   ; added    ; [API] Asynchronous catalog-evaluation endpoint                                    ;        ;   ;   ; `POST /api/eval/resolution` starts an evaluation run and `GET /api/eval/resolution/{id}` polls it for the scored report: failing cases, false-exclusions, cross-kit interference, and trait contamination.
+
 # --- 2026.7.12 -----------------------------------------------------------------------------------------------------------------------------------------------------
 2026.7.12a3   ; fixed    ; [MCP] A broken kit no longer takes down the whole catalog                         ;        ;   ; x ; A kit whose instructions index is missing or malformed is now isolated and excluded from selection instead of aborting the entire catalog load, so `list_kits`/`resolve_kits` keep serving every healthy kit.
 2026.7.12a3   ; added    ; [UI] Broken kits surfaced in the kit list                                         ;        ;   ;   ; The kit list flags a malformed kit with an alert row and its load error (and no detail link) so it can be found and fixed.

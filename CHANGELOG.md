@@ -1,6 +1,32 @@
 # Changelog
 
 
+## Release 2026.7.13 (2026-07-13)
+
+Kit authors can now evaluate how well a catalog resolves — measuring
+
+per-kit coverage, false-exclusions, and cross-kit interference — over 
+any
+kit folder, including kits that are not yet deployed. The 
+evaluation works
+for any domain and is available as a local CLI, an 
+`evaluate_catalog` MCP
+tool, a bundled prompt, and an asynchronous 
+REST endpoint.
+
+
+
+### Added
+- ☆ **[MCP] Kit-catalog resolution evaluation for authors** *@
+  2026.7.13a1*
+
+  Kit authors can measure how well a catalog resolves — per-kit coverage, false-exclusions (a kit silently dropped when an over-inferred trait matches its `excludes`), and cross-kit interference — over any kit folder, including not-yet-deployed kits in any domain. Exposed through the `evaluate_catalog` MCP tool and the domain-agnostic `catalog_evaluation` prompt.
+
+- [API] Asynchronous catalog-evaluation endpoint *@ 2026.7.13a1*
+
+  `POST /api/eval/resolution` starts an evaluation run and `GET /api/eval/resolution/{id}` polls it for the scored report: failing cases, false-exclusions, cross-kit interference, and trait contamination.
+
+
 ## Release 2026.7.12 (2026-07-12)
 
 A public pre-login landing page and a tactical navy/brass redesign 
