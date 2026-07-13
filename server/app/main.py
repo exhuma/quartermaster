@@ -99,12 +99,16 @@ from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
 from app.changelog import load_changelog_json
 from app.templating import load_asset
+from app.eval.jobs import EvalJobNotFoundError
 from app.routers import (
     app_tokens,
     clients,
     integration,
     kits_admin,
     kits_layers,
+)
+from app.routers import (
+    eval as eval_router,
 )
 from app.routers import (
     me as me_router,
@@ -1198,6 +1202,7 @@ _EXCEPTION_STATUS: dict[type[Exception], int] = {
     KitValidationError: 422,
     KitPathError: 400,
     KitLayerReadonlyError: 403,
+    EvalJobNotFoundError: 404,
 }
 
 
@@ -1319,6 +1324,7 @@ def create_app() -> FastAPI:
     application.include_router(kits_layers.router)
     application.include_router(kits_admin.router)
     application.include_router(integration.router)
+    application.include_router(eval_router.router)
     application.include_router(clients.router)
     application.include_router(app_tokens.router)
     application.include_router(metrics_router.router)
