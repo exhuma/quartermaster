@@ -19,6 +19,12 @@
 # installed package metadata.
 ARG APP_VERSION=
 
+# The release channel this build advances (scripts/derive_channels.sh
+# --primary): alpha|beta|rc|stable. Baked into the docs (rendered image tags)
+# and the runtime (the catalog_evaluation prompt's image tag). Defaults to
+# alpha — the only channel shipped so far — so dev/source builds are correct.
+ARG APP_CHANNEL=alpha
+
 # ---------------------------------------------------------------------------
 # Stage 1 — web UI build
 # ---------------------------------------------------------------------------
@@ -121,6 +127,11 @@ RUN uv sync --frozen --no-install-project --no-dev \
 ARG APP_VERSION
 ENV APP_VERSION=$APP_VERSION
 
+# Bake the release channel into the rendered docker examples (see conf.py
+# _bake_channel); defaults to alpha for dev/source builds.
+ARG APP_CHANNEL
+ENV QM_RELEASE_CHANNEL=$APP_CHANNEL
+
 # Zero-warning HTML build (-W), matching CI and the module-docs-sphinx kit.
 RUN /app/.venv/bin/sphinx-build -W -b html docs docs/_build/html
 
@@ -183,6 +194,12 @@ USER appuser
 # runtime falls back to the installed package metadata (see app/version.py).
 ARG APP_VERSION
 ENV QM_APP_VERSION=$APP_VERSION
+
+# The channel this build advances, so the served catalog_evaluation prompt
+# points at the matching image tag (see app/version.py app_channel). Defaults
+# to alpha for dev/source builds.
+ARG APP_CHANNEL
+ENV QM_APP_CHANNEL=$APP_CHANNEL
 
 ENV PATH="/app/.venv/bin:$PATH"
 

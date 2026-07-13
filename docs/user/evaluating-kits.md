@@ -36,7 +36,8 @@ With the published container image and no local Python:
 
 ```console
 $ docker run --rm --cpus 2 --memory 2g -v "/path/to/kit-catalog:/data/kits" \
-    -e QM_KITS_ROOT=/data/kits quartermaster python -m app.eval
+    -e QM_KITS_ROOT=/data/kits \
+    ghcr.io/exhuma/quartermaster:alpha python -m app.eval
 ```
 
 The run is resource-heavy — it loads an embedding model and runs inference for

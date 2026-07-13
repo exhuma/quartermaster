@@ -85,3 +85,28 @@ def test_get_canned_prompt_returns_prompt() -> None:
 def test_get_canned_prompt_unknown_raises_keyerror() -> None:
     with pytest.raises(KeyError):
         get_canned_prompt("missing")
+
+
+def test_catalog_evaluation_leads_with_docker_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The eval runbook must drive docker (no local Python assumed), and its
+    image tag must default to the published alpha channel."""
+    monkeypatch.delenv("QM_APP_CHANNEL", raising=False)
+    body = get_canned_prompt("catalog_evaluation")["prompt_template"]
+    assert "ghcr.io/exhuma/quartermaster:alpha" in body
+    # No leftover placeholder, and docker precedes the bare-python fallback.
+    assert "<quartermaster-image>" not in body
+    assert body.index("docker run") < body.index(
+        "QM_KITS_ROOT=<catalog-root> python -m app.eval"
+    )
+
+
+def test_catalog_evaluation_image_tracks_build_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-alpha build hands out its own channel's image tag."""
+    monkeypatch.setenv("QM_APP_CHANNEL", "beta")
+    body = get_canned_prompt("catalog_evaluation")["prompt_template"]
+    assert "ghcr.io/exhuma/quartermaster:beta" in body
+    assert "ghcr.io/exhuma/quartermaster:alpha" not in body

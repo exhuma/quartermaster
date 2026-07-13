@@ -25,6 +25,12 @@ from importlib.metadata import version as _pkg_version
 
 _PLACEHOLDER = "0.0.0"
 
+# The release channel a local/source build is assumed to track. Releases are
+# published on pre-release channels (see scripts/derive_channels.sh); alpha is
+# the least-mature and the only one shipped so far, so it is the safe default
+# for docs/prompts when no channel is baked in.
+_DEFAULT_CHANNEL = "alpha"
+
 
 def app_version() -> str:
     """Return the version the app should report (env override → metadata)."""
@@ -35,3 +41,15 @@ def app_version() -> str:
         return _pkg_version("quartermaster")
     except PackageNotFoundError:  # pragma: no cover - always installed
         return _PLACEHOLDER
+
+
+def app_channel() -> str:
+    """Return the release channel this build advances.
+
+    Injected at release-image build time from the derived primary channel
+    (``scripts/derive_channels.sh --primary`` → the ``APP_CHANNEL`` build arg →
+    ``QM_APP_CHANNEL``, see ``server/Dockerfile``). Falls back to the
+    pre-release ``alpha`` channel for local/source runs. Used to point the
+    served ``catalog_evaluation`` prompt at the matching container image tag.
+    """
+    return os.environ.get("QM_APP_CHANNEL", "").strip() or _DEFAULT_CHANNEL

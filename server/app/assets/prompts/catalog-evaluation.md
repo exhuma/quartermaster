@@ -20,10 +20,16 @@ kits — including not-yet-deployed ones — not a remote server that lacks them
 
 1. Locate the kit-catalog root: the folder whose subdirectories each hold an
    `applicability.json` and a `v<N>/instructions/` directory.
-2. Run the evaluation over that folder:
-   - `QM_KITS_ROOT=<catalog-root> python -m app.eval --cases all`, or
-   - the container form:
-     `docker run --rm --cpus 2 --memory 2g -v "<catalog-root>:/data/kits" -e QM_KITS_ROOT=/data/kits <quartermaster-image> python -m app.eval --cases all`
+2. Run the evaluation over that folder **with the published container image**.
+   Do NOT assume `python` or a Quartermaster checkout exists in your
+   environment — run it via `docker` (or `podman`), which needs neither:
+   ```
+   docker run --rm --cpus 2 --memory 2g -v "<catalog-root>:/data/kits" -e QM_KITS_ROOT=/data/kits ghcr.io/exhuma/quartermaster:alpha python -m app.eval --cases all
+   ```
+   Only if you already have a Quartermaster **source checkout** with Python and
+   its dependencies installed may you instead run it directly:
+   `QM_KITS_ROOT=<catalog-root> python -m app.eval --cases all`.
+
    The run is resource-heavy; `--cpus 2 --memory 2g` caps it (drop the flags for
    full power). Add `--json` to capture the report, `--limit N` for a quick
    smoke run. The first case loads the embedding model, so expect a pause of
@@ -94,13 +100,18 @@ kits — including not-yet-deployed ones — not a remote server that lacks them
          forbid:  { capabilities: [<trait it must not infer>] }
        kits_include: [<kit that should be recommended>]
    ```
-5. To evaluate a *change*, capture a baseline first, edit, then diff:
-   - `python -m app.eval --kits-root <root> --json > before.json`
-   - …edit a kit's `applicability.json` (`requires` / `excludes` /
-     `optional_signals`) or its `summary`…
-   - `python -m app.eval --kits-root <root> --baseline before.json`
-   The diff names kits that started or stopped resolving, new false-exclusions,
-   and rank shifts — the side effects of your edit.
+5. To evaluate a *change*, capture a baseline first, edit, then diff. Mount the
+   current directory too (`-v "$PWD:/work"`) so the baseline file is reachable
+   inside the container on the second run:
+   ```
+   docker run --rm -v "<catalog-root>:/data/kits" -v "$PWD:/work" -e QM_KITS_ROOT=/data/kits ghcr.io/exhuma/quartermaster:alpha python -m app.eval --json > before.json
+   # …edit a kit's applicability.json (requires / excludes / optional_signals) or summary…
+   docker run --rm -v "<catalog-root>:/data/kits" -v "$PWD:/work" -e QM_KITS_ROOT=/data/kits ghcr.io/exhuma/quartermaster:alpha python -m app.eval --baseline /work/before.json
+   ```
+   (With a local checkout: `python -m app.eval --kits-root <root> --json >
+   before.json`, then `… --baseline before.json`.) The diff names kits that
+   started or stopped resolving, new false-exclusions, and rank shifts — the
+   side effects of your edit.
 6. Iterate: tighten a kit's `requires` / `excludes`, and sharpen its `summary`
    and `optional_signals` so its traits are inferred for the right tasks and not
    the wrong ones. Re-run until failing cases and false-exclusions are gone.

@@ -11,6 +11,20 @@ expects, so callers are unaffected by where the body text lives.
 from __future__ import annotations
 
 from app.templating import render_asset
+from app.version import app_channel
+
+# Prompt bodies reference the published container image at its default channel;
+# rewrite that tag to the channel this build actually advances so a beta/rc/
+# stable image hands out its own image tag. A no-op on the default channel.
+_DEFAULT_IMAGE = "ghcr.io/exhuma/quartermaster:alpha"
+_IMAGE_BASE = "ghcr.io/exhuma/quartermaster"
+
+
+def _bake_image_channel(body: str) -> str:
+    channel = app_channel()
+    if channel == "alpha":
+        return body
+    return body.replace(_DEFAULT_IMAGE, f"{_IMAGE_BASE}:{channel}")
 
 # Registry of canned prompts. ``template_file`` is a basename under
 # ``app/assets/prompts/``; the body is loaded on access.
@@ -128,11 +142,12 @@ _PROMPTS: list[dict[str, str]] = [
 
 def _materialize(entry: dict[str, str]) -> dict[str, str]:
     """Return a public prompt dict with its markdown body loaded."""
+    body = render_asset("prompts", entry["template_file"])
     return {
         "name": entry["name"],
         "title": entry["title"],
         "intent": entry["intent"],
-        "prompt_template": render_asset("prompts", entry["template_file"]),
+        "prompt_template": _bake_image_channel(body),
     }
 
 

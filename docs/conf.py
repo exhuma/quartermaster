@@ -119,3 +119,30 @@ intersphinx_mapping = {
 html_theme = "furo"
 html_static_path = ["_static"]
 html_title = f"Quartermaster {release}"
+
+
+# -- release-channel baking --------------------------------------------------
+# Docker examples in the Markdown source reference the default `alpha` channel
+# (readable and correct today). Since the docs are bundled into each release
+# image, rewrite that tag to the channel THIS build advances so the served
+# docs point at their own image. The channel is injected via the QM_RELEASE_
+# CHANNEL env var (docs Docker stage, from scripts/derive_channels.sh
+# --primary); it defaults to `alpha` for local builds. Done on the raw source
+# (source-read) so it also applies inside fenced code blocks, which MyST
+# substitutions do not reach.
+_DEFAULT_CHANNEL = "alpha"
+_CHANNEL = os.environ.get("QM_RELEASE_CHANNEL", "").strip() or _DEFAULT_CHANNEL
+_IMAGE_BASE = "ghcr.io/exhuma/quartermaster"
+
+
+def _bake_channel(_app: object, _docname: str, source: list[str]) -> None:
+    if _CHANNEL == _DEFAULT_CHANNEL:
+        return
+    source[0] = source[0].replace(
+        f"{_IMAGE_BASE}:{_DEFAULT_CHANNEL}", f"{_IMAGE_BASE}:{_CHANNEL}"
+    )
+
+
+def setup(app: object) -> dict[str, object]:
+    app.connect("source-read", _bake_channel)  # type: ignore[attr-defined]
+    return {"parallel_read_safe": True, "parallel_write_safe": True}
