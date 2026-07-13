@@ -29,7 +29,7 @@ router = APIRouter(
 class ResolutionEvalRequest(BaseModel):
     """Parameters for a resolution-eval run (all optional)."""
 
-    cases: Literal["catalog", "curated", "all"] = "all"
+    cases: Literal["catalog", "authored", "all"] = "all"
     limit: int = Field(
         default=0, ge=0, description="cap number of cases (0 = all)"
     )

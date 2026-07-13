@@ -139,11 +139,60 @@ def test_build_report_aggregates() -> None:
     tally = report["false_exclusion_tally"]["mod-style"]
     assert tally["count"] == 1
     assert tally["confirmed_spurious"] == 1
-    # both cases forbid js -> js leaked in 1 of 2.
-    assert report["language_contamination"]["javascript"] == {
+    # both cases forbid js -> js leaked in 1 of 2 (nested by category).
+    assert report["contamination"]["languages"]["javascript"] == {
         "forbidden": 2,
         "leaked": 1,
     }
+
+
+def _catalog_probe(kit: str, ranked: list[str]) -> dict[str, Any]:
+    """A catalog self-probe record where `ranked` is the resolved kit order."""
+    return {
+        "id": f"catalog::{kit}",
+        "source": "catalog",
+        "engine": "embedding",
+        "task": f"work on {kit}",
+        "inferred_traits": {
+            "languages": [],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
+        "kits": [{"name": n, "score": 100 - i} for i, n in enumerate(ranked)],
+        "expect": {
+            "include": {},
+            "forbid": {},
+            "kits_include": [kit],
+            "kits_forbid": [],
+        },
+    }
+
+
+def test_interference_attribution() -> None:
+    # kit-b's own probe is topped by kit-a -> kit-a displaces kit-b.
+    rec = _catalog_probe("kit-b", ["kit-a", "kit-b"])
+    report = build_report([rec], catalog=[])
+    case = report["cases"][0]
+    assert case["self_rank"] == 1
+    assert case["displaced_by"] == ["kit-a"]
+    assert report["interference_tally"]["kit-a"]["displaces"] == {"kit-b": 1}
+    # a kit that tops its own probe records no interference.
+    clean = build_report([_catalog_probe("kit-a", ["kit-a", "kit-b"])], [])
+    assert clean["interference_tally"] == {}
+    assert clean["cases"][0]["displaced_by"] == []
+
+
+def test_diff_reports_surfaces_regression() -> None:
+    from app.eval.report import diff_reports
+
+    baseline = build_report([_catalog_probe("kit-b", ["kit-b"])], [])
+    # candidate: kit-b no longer resolves to itself (only kit-a returned).
+    candidate = build_report([_catalog_probe("kit-b", ["kit-a"])], [])
+    diff = diff_reports(baseline, candidate)
+    assert "catalog::kit-b" in diff["newly_failing"]
+    assert "kit-b" in diff["kits"]["newly_missing"]
+    assert diff["newly_passing"] == []
 
 
 def test_build_report_flags_nondeterminism() -> None:

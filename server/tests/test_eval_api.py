@@ -76,9 +76,9 @@ def test_poll_known_job(client: TestClient) -> None:
 
 
 def test_params_passed_through(client: TestClient) -> None:
-    body = _start(client, {"cases": "curated", "limit": 5}).json()
-    assert body["params"] == {"cases": "curated", "limit": 5}
-    assert body["report"]["params"] == {"cases": "curated", "limit": 5}
+    body = _start(client, {"cases": "authored", "limit": 5}).json()
+    assert body["params"] == {"cases": "authored", "limit": 5}
+    assert body["report"]["params"] == {"cases": "authored", "limit": 5}
 
 
 def test_unknown_job_is_404(client: TestClient) -> None:

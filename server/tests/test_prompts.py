@@ -23,6 +23,7 @@ def test_list_canned_prompts_has_expected_entries() -> None:
         "audit_project_skills",
         "maintain_project_skills",
         "quartermaster_pin_file",
+        "catalog_evaluation",
     }
 
 

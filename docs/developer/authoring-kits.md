@@ -115,3 +115,11 @@ Quartermaster enforces all of the above when it loads or writes a kit:
 - Via the REST API (`PUT /api/kits/...`): writes are validated **before**
   commit and rejected with `422` if invalid, so the catalog can't be left
   unloadable.
+
+## Evaluate your kits
+
+Validation proves a kit *loads*; it does not prove it *resolves* — that the
+right tasks reach it and it does not shadow other kits. After authoring or
+changing a kit, run the resolution evaluation over your catalog folder to check
+coverage, false-exclusions, and cross-kit interference. See
+[Evaluating kits](evaluating-kits.md).

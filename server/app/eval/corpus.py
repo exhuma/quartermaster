@@ -1,15 +1,16 @@
-"""Evaluation corpus for kit resolution.
+"""Evaluation corpus for kit resolution — domain-agnostic.
 
-Two sources, combined:
+The active kit root *is* the catalog, so the corpus adapts to whatever kits an
+instance serves (software, baking, legal — anything). Two sources:
 
-* **catalog-derived** — one probe per real kit, generated from its manifest.
-  The kit's own ``requires`` are the traits that *should* be inferred; its
+* **catalog-derived** — one probe per kit, generated from its manifest. The
+  kit's own ``requires`` are the traits that *should* be inferred; its
   ``excludes`` are the traits that must *not* be inferred (inferring one would
-  silently drop the kit). Comprehensive per-kit coverage with no hand-labeling,
-  so it works for any catalog an instance serves.
-* **curated** — a bundled ``cases/curated.yaml`` of natural, mostly-monolingual
-  tasks that pin the cross-language contamination the embedding engine is prone
-  to.
+  silently drop the kit). Comprehensive per-kit coverage with no hand-labeling.
+* **authored** — an OPTIONAL ``eval-cases.yaml`` at the kit-catalog root,
+  written by whoever owns the domain. Natural-language tasks with expected /
+  forbidden traits and kits, in that domain's own vocabulary. Nothing
+  domain-specific ships with the server; the author supplies it.
 """
 
 from __future__ import annotations
@@ -22,10 +23,15 @@ import yaml
 
 TRAIT_CATEGORIES = ("languages", "frameworks", "capabilities", "contexts")
 
-# The literal placeholder kit shipped in the catalog; carries no real traits.
+# The literal placeholder kit shipped in some catalogs; carries no real traits.
 _SKIP_KITS = {"test"}
 
-CURATED_PATH = Path(__file__).parent / "cases" / "curated.yaml"
+# Conventional author-supplied cases file, discovered at the kit-catalog root.
+# Kit discovery only scans ``*/applicability.json`` directories, so a plain
+# file here never clashes with a kit.
+AUTHOR_CASES_FILENAME = "eval-cases.yaml"
+
+CASE_SETS = ("catalog", "authored", "all")
 
 
 @dataclass(frozen=True)
@@ -34,7 +40,7 @@ class Case:
 
     id: str
     task: str
-    source: str  # "catalog" | "curated"
+    source: str  # "catalog" | "authored"
     # category -> traits that SHOULD appear in inferred_traits
     expect_include: dict[str, list[str]] = field(default_factory=dict)
     # category -> traits that must NOT appear in inferred_traits
@@ -98,16 +104,16 @@ def derive_from_catalog(catalog: list[dict[str, Any]]) -> list[Case]:
     return cases
 
 
-def _normalize_curated(raw: dict[str, Any], index: int) -> Case:
-    cid = str(raw.get("id") or f"curated-{index}")
+def _normalize_authored(raw: dict[str, Any], index: int) -> Case:
+    cid = str(raw.get("id") or f"case-{index}")
     task = raw.get("task")
     if not task:
-        raise ValueError(f"curated case {cid!r} has no 'task'")
+        raise ValueError(f"authored case {cid!r} has no 'task'")
     expect = raw.get("expect") or {}
     return Case(
-        id=f"curated::{cid}",
+        id=f"authored::{cid}",
         task=str(task),
-        source="curated",
+        source="authored",
         expect_include=_clean_categories(expect.get("include")),
         expect_forbid=_clean_categories(expect.get("forbid")),
         kits_include=list(
@@ -119,26 +125,35 @@ def _normalize_curated(raw: dict[str, Any], index: int) -> Case:
     )
 
 
-def load_curated(path: Path = CURATED_PATH) -> list[Case]:
-    """Parse the curated language-purity suite from YAML."""
+def load_author_cases(kits_root: Path | str | None) -> list[Case]:
+    """Load the optional author-supplied ``eval-cases.yaml`` from the root.
+
+    Returns ``[]`` when the root is unset or the file is absent — authored
+    cases are optional.
+    """
+    if not kits_root:
+        return []
+    path = Path(kits_root) / AUTHOR_CASES_FILENAME
     if not path.exists():
         return []
     doc = yaml.safe_load(path.read_text()) or {}
     raw_cases = doc.get("cases") or []
-    return [_normalize_curated(rc, i) for i, rc in enumerate(raw_cases)]
+    return [_normalize_authored(rc, i) for i, rc in enumerate(raw_cases)]
 
 
 def build_cases(
     which: str,
     catalog: list[dict[str, Any]],
-    curated_path: Path = CURATED_PATH,
+    kits_root: Path | str | None,
 ) -> list[Case]:
-    """Assemble the requested case set (``catalog`` | ``curated`` | ``all``)."""
-    if which not in ("catalog", "curated", "all"):
-        raise ValueError(f"unknown case set {which!r}")
+    """Assemble the requested set (``catalog`` | ``authored`` | ``all``)."""
+    if which not in CASE_SETS:
+        raise ValueError(
+            f"unknown case set {which!r}; expected one of {CASE_SETS}"
+        )
     cases: list[Case] = []
-    if which in ("curated", "all"):
-        cases.extend(load_curated(curated_path))
+    if which in ("authored", "all"):
+        cases.extend(load_author_cases(kits_root))
     if which in ("catalog", "all"):
         cases.extend(derive_from_catalog(catalog))
     return cases

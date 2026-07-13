@@ -56,8 +56,11 @@ from app import health as health_probes
 from app import telemetry
 from app.auth import JWTAuthMiddleware
 from app.authz import EditorRequiredError, PrivateKitAccessError
+from app.changelog import load_changelog_json
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
+from app.docs_site import mount_docs
+from app.eval.jobs import EvalJobNotFoundError
 from app.identity import current_sub
 from app.kits import (
     KitConflictError,
@@ -97,9 +100,6 @@ from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.resolver import build_ranker
 from app.resolver import resolve_kits as _resolve_kits
-from app.changelog import load_changelog_json
-from app.templating import load_asset
-from app.eval.jobs import EvalJobNotFoundError
 from app.routers import (
     app_tokens,
     clients,
@@ -129,11 +129,11 @@ from app.sampling import (
 )
 from app.storage import user_memory
 from app.storage.kit_writes import KitPathError
+from app.templating import load_asset
 from app.tokens import count_tokens
 from app.traits import load_vocabulary
 from app.user_agent import UserAgentMiddleware
 from app.version import app_version
-from app.docs_site import mount_docs
 from app.webui import mount_webui
 
 # ---------------------------------------------------------------------------
@@ -263,6 +263,36 @@ def get_prompt(name: str) -> dict:
         return _get_canned_prompt(name)
     except KeyError as exc:
         raise ValueError(f"Prompt not found: {name!r}") from exc
+
+
+@mcp.tool
+async def evaluate_catalog(cases: str = "all", limit: int = 0) -> dict:
+    """
+    Evaluate how well THIS instance's kit catalog resolves.
+
+    Runs the resolution-eval corpus (one probe per kit, plus any author-supplied
+    ``eval-cases.yaml`` at the catalog root) against the in-process resolver and
+    returns a scored report: failing cases, catalog-wide false-exclusions,
+    cross-kit interference, and trait contamination. Use this for a deployed
+    catalog's health check; to evaluate not-yet-deployed *local* kits, run the
+    eval against that folder instead (see the ``catalog_evaluation`` prompt).
+
+    :param cases: case set — ``catalog`` | ``authored`` | ``all``.
+    :param limit: cap the number of cases (0 = all).
+    :returns: The evaluation report.
+    :raises ValueError: If *cases* is not a known set.
+    """
+    import anyio
+
+    from app.eval.corpus import CASE_SETS
+    from app.eval.runner import run_resolution_eval
+
+    if cases not in CASE_SETS:
+        raise ValueError(
+            f"unknown case set {cases!r}; expected one of {CASE_SETS}"
+        )
+    # The runner is CPU-bound (embedding inference); keep the event loop free.
+    return await anyio.to_thread.run_sync(run_resolution_eval, cases, limit)
 
 
 def _register_canned_prompts() -> None:
@@ -505,9 +535,7 @@ def _sampling_memory_hint(settings: Any) -> str:
         return ""
 
 
-async def _infer_via_sampling(
-    task: str, ctx: Context, settings: Any
-) -> Any:
+async def _infer_via_sampling(task: str, ctx: Context, settings: Any) -> Any:
     """
     Infer traits via MCP sampling, or ``None`` to fall back to the chain.
 
@@ -652,7 +680,7 @@ _REPORT_INSTRUCTION = (
     "approaches).\n"
     "3. Impact on this task — for each significant implementation decision, "
     "state whether and how a kit's guidance shaped it. Be explicit (e.g. "
-    "\"Used PKCE flow because module-auth-oidc requires it\"). If a decision "
+    '"Used PKCE flow because module-auth-oidc requires it"). If a decision '
     "was not influenced by any kit, say so — gaps in coverage are useful data "
     "for evaluating Quartermaster.\n"
     "Keep the report concise but honest. Its purpose is to let the user "
@@ -754,9 +782,7 @@ async def resolve_kits(
         settings, "elicitation_enabled", True
     )
     can_elicit = (
-        ctx is not None
-        and elicitation_on
-        and client_supports_elicitation(ctx)
+        ctx is not None and elicitation_on and client_supports_elicitation(ctx)
     )
 
     task = (task or "").strip()
@@ -1217,9 +1243,7 @@ def _register_exception_handlers(application: FastAPI) -> None:
         code: int,
     ) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
         async def _handler(_request: Request, exc: Exception) -> JSONResponse:
-            return JSONResponse(
-                status_code=code, content={"detail": str(exc)}
-            )
+            return JSONResponse(status_code=code, content={"detail": str(exc)})
 
         return _handler
 
@@ -1367,9 +1391,7 @@ def create_app() -> FastAPI:
     # fallback so it is never shadowed; secured (or left anonymous) by
     # JWTAuthMiddleware per QM_METRICS_ALLOW_ANONYMOUS.
     if serve_metrics:
-        application.add_api_route(
-            "/metrics", metrics_endpoint, methods=["GET"]
-        )
+        application.add_api_route("/metrics", metrics_endpoint, methods=["GET"])
 
     # Serve the rendered documentation site at /docs (no-op when there is no
     # build). Mounted before the SPA so the /docs sub-app is matched ahead of
@@ -1395,9 +1417,7 @@ def create_app() -> FastAPI:
     application.add_middleware(JWTAuthMiddleware)
     application.add_middleware(UserAgentMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
-    application.add_middleware(
-        VersionHeaderMiddleware, version=app_version()
-    )
+    application.add_middleware(VersionHeaderMiddleware, version=app_version())
     application.add_middleware(RequestLoggingMiddleware)
     return application
 

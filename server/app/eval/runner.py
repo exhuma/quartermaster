@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app import kits as kits_mod
 from app.kits import list_catalog_v2, select_kits_v2
 from app.resolver import _infer
 from app.traits import load_vocabulary
@@ -64,12 +65,13 @@ def run_resolution_eval(
 ) -> dict[str, Any]:
     """Run the corpus in-process and return a scored report.
 
-    :param which: case set — ``catalog`` | ``curated`` | ``all``.
+    :param which: case set — ``catalog`` | ``authored`` | ``all``.
     :param limit: cap the number of cases (0 = all). Useful for smoke runs.
     """
     catalog = list_catalog_v2()
     vocab = load_vocabulary()
-    cases = build_cases(which, catalog)
+    kits_root = kits_mod.get_settings().kits_root
+    cases = build_cases(which, catalog, kits_root)
     if limit:
         cases = cases[:limit]
 

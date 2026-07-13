@@ -133,3 +133,21 @@ def test_runner_surfaces_false_exclusion(eval_catalog: Path) -> None:
     excluded = {fx["kit"] for fx in py["false_exclusions"]}
     assert "mod-vue" in excluded
     assert "mod-vue" in report["false_exclusion_tally"]
+
+
+def test_runner_loads_author_cases(eval_catalog: Path) -> None:
+    # An optional eval-cases.yaml at the catalog root supplies domain cases.
+    (eval_catalog / "eval-cases.yaml").write_text(
+        "cases:\n"
+        "  - id: my-python-task\n"
+        "    task: build a python backend service\n"
+        "    kits_include: [mod-py]\n"
+    )
+    report = run_resolution_eval(which="authored")
+    ids = [c["id"] for c in report["cases"]]
+    assert ids == [
+        "authored::my-python-task"
+    ]  # only authored, no catalog probes
+    case = _case(report, "authored::my-python-task")
+    # "python" is inferred (lexical) -> mod-py selected -> no missing-kit.
+    assert not any(f["kind"] == "missing-kit" for f in case["findings"])

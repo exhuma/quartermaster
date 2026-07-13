@@ -13,7 +13,7 @@ from collections.abc import Callable
 from app.eval.jobs import EvalJob, EvalJobStore
 from app.eval.runner import run_resolution_eval
 
-VALID_CASE_SETS = ("catalog", "curated", "all")
+VALID_CASE_SETS = ("catalog", "authored", "all")
 
 _store = EvalJobStore()
 

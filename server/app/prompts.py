@@ -48,8 +48,7 @@ _PROMPTS: list[dict[str, str]] = [
         "name": "legacy_assessment",
         "title": "Legacy Project Diagnostic",
         "intent": (
-            "Assess an aging codebase and identify high-value "
-            "applicable kits."
+            "Assess an aging codebase and identify high-value applicable kits."
         ),
         "template_file": "legacy-assessment.md",
     },
@@ -72,8 +71,7 @@ _PROMPTS: list[dict[str, str]] = [
         "name": "tech_debt_modernization",
         "title": "Tech Debt Modernization Priority",
         "intent": (
-            "Prioritize modernization work with kit-guided adoption "
-            "steps."
+            "Prioritize modernization work with kit-guided adoption steps."
         ),
         "template_file": "tech-debt-modernization.md",
     },
@@ -114,11 +112,22 @@ _PROMPTS: list[dict[str, str]] = [
         ),
         "template_file": "quartermaster-toml.md",
     },
+    {
+        "name": "catalog_evaluation",
+        "title": "Evaluate a Kit Catalog",
+        "intent": (
+            "Runbook for a kit author's agent to evaluate how well a kit "
+            "catalog resolves — coverage, hit rate, false-exclusions, and "
+            "cross-kit interference — over the local kit folder, for authoring "
+            "new kits, reviewing existing ones, or checking a change's impact."
+        ),
+        "template_file": "catalog-evaluation.md",
+    },
 ]
 
 
 def _materialize(entry: dict[str, str]) -> dict[str, str]:
-    """Return a public prompt dict with the body loaded from its markdown file."""
+    """Return a public prompt dict with its markdown body loaded."""
     return {
         "name": entry["name"],
         "title": entry["title"],

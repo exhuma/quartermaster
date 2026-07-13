@@ -8,6 +8,9 @@ Working on the Quartermaster server and web UI.
   SPA; consult it before making changes.
 - **[Authoring kits](authoring-kits.md)** — how instruction kits are structured
   in the external catalog repository.
+- **[Evaluating kits](evaluating-kits.md)** — measure how well a catalog
+  resolves: coverage, false-exclusions, cross-kit interference, and the impact
+  of a change.
 - **[Migrations](migrations/authorization.md)** — upgrade guides for
   authorization/roles and layered kit catalogs.
 - **[Python API reference](api/index.md)** — autodoc for the backend modules.
@@ -19,6 +22,7 @@ Working on the Quartermaster server and web UI.
 development
 contract
 authoring-kits
+evaluating-kits
 migrations/authorization
 migrations/kit-layers
 api/index
