@@ -72,16 +72,42 @@ def main(argv: list[str] | None = None) -> int:
     _prepare_env(args.kits_root)
 
     # Import after env is prepared (runner reads settings lazily per call).
+    from rich.console import Console
+
+    from .render import build_progress, render_diff, render_report
     from .report import diff_reports, format_diff_text, format_text
     from .runner import run_resolution_eval
 
-    report = run_resolution_eval(which=args.cases, limit=args.limit)
+    # Progress renders to stderr and no-ops when stderr is not a terminal, so
+    # stdout (the report / JSON) stays clean and pipeable.
+    progress = build_progress(disable=not sys.stderr.isatty())
+    task_id = progress.add_task(
+        "Loading catalog & embedding model…", total=None
+    )
+
+    def on_progress(done: int, total: int) -> None:
+        progress.update(
+            task_id, description="Evaluating cases", total=total, completed=done
+        )
+
+    with progress:
+        report = run_resolution_eval(
+            which=args.cases, limit=args.limit, on_progress=on_progress
+        )
+        progress.update(task_id, description="Complete")
+
+    # Rich renders the report only for an interactive stdout; piped/redirected
+    # runs keep the byte-for-byte plain text (and JSON) they emit today.
+    pretty = sys.stdout.isatty()
+    out = Console()
 
     if args.baseline:
         baseline = json.loads(Path(args.baseline).read_text())
         diff = diff_reports(baseline, report)
         if args.json:
             print(json.dumps(diff, indent=2))
+        elif pretty:
+            render_diff(diff, out)
         else:
             print(format_diff_text(diff))
         # A regression (newly failing/missing) is the actionable signal.
@@ -90,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(report, indent=2))
+    elif pretty:
+        render_report(report, out)
     else:
         print(format_text(report))
     return 1 if report["totals"]["failed"] else 0

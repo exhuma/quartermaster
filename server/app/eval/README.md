@@ -32,7 +32,9 @@ interference, and trait contamination; `diff_reports` compares two reports.
 
 - **CLI** — `python -m app.eval` (local, no server). `--kits-root PATH`,
   `--cases {catalog,authored,all}`, `--limit N`, `--json`, `--baseline
-  report.json`. Non-zero exit on failure (CI gate).
+  report.json`. Non-zero exit on failure (CI gate). In a terminal it shows a
+  live `rich` progress bar (on stderr) and a summary report; piped/redirected
+  output falls back to plain text. Presentation lives in `render.py`.
 - **MCP tool** — `evaluate_catalog(cases, limit)` runs over the instance's own
   catalog and returns the report (one call, for agents on a running instance).
 - **MCP prompt** — `catalog_evaluation`, a domain-neutral runbook for an

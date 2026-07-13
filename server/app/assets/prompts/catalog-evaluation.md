@@ -23,8 +23,10 @@ kits — including not-yet-deployed ones — not a remote server that lacks them
 2. Run the evaluation over that folder:
    - `QM_KITS_ROOT=<catalog-root> python -m app.eval --cases all`, or
    - the container form:
-     `docker run --rm -v "<catalog-root>:/data/kits" -e QM_KITS_ROOT=/data/kits <quartermaster-image> python -m app.eval --cases all`
-   Add `--json` to capture the report, `--limit N` for a quick smoke run.
+     `docker run --rm --cpus 2 --memory 2g -v "<catalog-root>:/data/kits" -e QM_KITS_ROOT=/data/kits <quartermaster-image> python -m app.eval --cases all`
+   The run is resource-heavy; `--cpus 2 --memory 2g` caps it (drop the flags for
+   full power). Add `--json` to capture the report, `--limit N` for a quick
+   smoke run.
 3. Read the report. Each section names a distinct failure mode:
    - **Failing cases** — a kit whose own probe did not resolve to it
      (`missing-kit`), a forbidden trait that got inferred (`contamination`), or

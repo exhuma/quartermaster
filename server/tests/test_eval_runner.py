@@ -9,12 +9,16 @@ a catalog-wide false-exclusion.
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 from app import resolver
+from app.eval.render import render_diff, render_report
+from app.eval.report import diff_reports
 from app.eval.runner import run_resolution_eval
 
 
@@ -151,3 +155,36 @@ def test_runner_loads_author_cases(eval_catalog: Path) -> None:
     case = _case(report, "authored::my-python-task")
     # "python" is inferred (lexical) -> mod-py selected -> no missing-kit.
     assert not any(f["kind"] == "missing-kit" for f in case["findings"])
+
+
+def test_runner_reports_progress(eval_catalog: Path) -> None:
+    calls: list[tuple[int, int]] = []
+    report = run_resolution_eval(
+        which="catalog", on_progress=lambda done, total: calls.append(
+            (done, total)
+        )
+    )
+    n = report["totals"]["cases"]
+    assert n == 2
+    # Fires once with (0, N) before the loop, then after each case.
+    assert calls[0] == (0, n)
+    assert calls[-1] == (n, n)
+    assert len(calls) == n + 1
+
+
+def test_render_report_smoke(eval_catalog: Path) -> None:
+    report = run_resolution_eval(which="catalog")
+    console = Console(file=io.StringIO(), width=100)
+    render_report(report, console)
+    text = console.file.getvalue()
+    assert "passed" in text
+    assert "failed" in text
+
+
+def test_render_diff_smoke(eval_catalog: Path) -> None:
+    report = run_resolution_eval(which="catalog")
+    diff = diff_reports(report, report)  # self-diff: no regressions
+    console = Console(file=io.StringIO(), width=100)
+    render_diff(diff, console)
+    text = console.file.getvalue()
+    assert "candidate" in text

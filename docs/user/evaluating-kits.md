@@ -35,9 +35,15 @@ $ python -m app.eval --kits-root /path/to/kit-catalog   # equivalent
 With the published container image and no local Python:
 
 ```console
-$ docker run --rm -v "/path/to/kit-catalog:/data/kits" \
+$ docker run --rm --cpus 2 --memory 2g -v "/path/to/kit-catalog:/data/kits" \
     -e QM_KITS_ROOT=/data/kits quartermaster python -m app.eval
 ```
+
+The run is resource-heavy — it loads an embedding model and runs inference for
+every kit. The `--cpus 2 --memory 2g` flags cap that as a safety measure; raise
+or drop them if you want to give the run full power. In a terminal the CLI shows
+a live progress bar during the run and a summary report at the end; when its
+output is piped or redirected it falls back to plain text.
 
 Useful flags:
 

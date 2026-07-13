@@ -13,6 +13,7 @@ embedding model silently degraded to the lexical floor.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from app import kits as kits_mod
@@ -62,11 +63,16 @@ def _resolve_case(case: Case, vocab: Any) -> dict[str, Any]:
 def run_resolution_eval(
     which: str = "all",
     limit: int = 0,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Run the corpus in-process and return a scored report.
 
     :param which: case set — ``catalog`` | ``authored`` | ``all``.
     :param limit: cap the number of cases (0 = all). Useful for smoke runs.
+    :param on_progress: optional callback invoked as ``(completed, total)`` —
+        once with ``(0, total)`` before the loop and again after each case.
+        Lets an interactive caller (the CLI) drive a progress bar while the
+        runner itself stays UI-agnostic. Non-interactive callers omit it.
     """
     catalog = list_catalog_v2()
     vocab = load_vocabulary()
@@ -75,7 +81,14 @@ def run_resolution_eval(
     if limit:
         cases = cases[:limit]
 
-    records = [_resolve_case(case, vocab) for case in cases]
+    total = len(cases)
+    if on_progress is not None:
+        on_progress(0, total)
+    records = []
+    for i, case in enumerate(cases):
+        records.append(_resolve_case(case, vocab))
+        if on_progress is not None:
+            on_progress(i + 1, total)
     report = build_report(records, catalog)
     report["params"] = {"cases": which, "limit": limit}
     report["catalog_size"] = len(catalog)
