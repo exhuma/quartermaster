@@ -16,6 +16,7 @@ from app import webui
 
 def _fake_settings() -> SimpleNamespace:
     return SimpleNamespace(
+        auth_disabled=False,
         server_origin="https://instructions.example.com",
         keycloak_issuer="https://auth.example.com/realms/master",
         webui_keycloak_client_id="quartermaster-webui",
@@ -23,14 +24,37 @@ def _fake_settings() -> SimpleNamespace:
     )
 
 
+def _fake_noauth_settings() -> SimpleNamespace:
+    """Auth-less settings: no Keycloak config to read at all."""
+    return SimpleNamespace(
+        auth_disabled=True,
+        server_origin="http://localhost:8000",
+        # Deliberately no keycloak_issuer/client_id/scopes: runtime_config must
+        # not touch them in auth-less mode.
+    )
+
+
 def test_render_config_js_shape() -> None:
     js = webui.render_config_js(_fake_settings())
     assert js.startswith("window.__APP_CONFIG__ = ")
     cfg = webui.runtime_config(_fake_settings())
+    assert cfg["authDisabled"] is False
     assert cfg["oidcAuthority"] == "https://auth.example.com/realms/master"
     assert cfg["oidcClientId"] == "quartermaster-webui"
     assert cfg["oidcRedirectUri"].endswith("/auth/callback")
     assert cfg["apiBaseUrl"] == ""
+
+
+def test_runtime_config_auth_disabled_omits_oidc() -> None:
+    """Auth-less runtime config advertises the flag and no OIDC values."""
+    cfg = webui.runtime_config(_fake_noauth_settings())
+    assert cfg["authDisabled"] is True
+    assert cfg["apiBaseUrl"] == ""
+    assert "oidcAuthority" not in cfg
+    assert "oidcClientId" not in cfg
+    # Rendering must not raise despite absent Keycloak config.
+    js = webui.render_config_js(_fake_noauth_settings())
+    assert '"authDisabled": true' in js
 
 
 def test_no_build_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -42,13 +42,44 @@ These four are mandatory; the server will not start without them:
 
 | Variable | Example | Notes |
 |---|---|---|
-| `QM_KEYCLOAK_URL` | `https://auth.example.com` | Base URL of Keycloak, no trailing slash. |
-| `QM_KEYCLOAK_REALM` | `quartermaster` | Realm that issues tokens. |
-| `QM_RESOURCE_BASE_URL` | `https://qm.example.com` | Public origin (scheme + host) as the browser/agent reaches it. Drives OAuth metadata and SPA redirect URIs. |
+| `QM_KEYCLOAK_URL` | `https://auth.example.com` | Base URL of Keycloak, no trailing slash. Optional when `QM_AUTH_DISABLED=true`. |
+| `QM_KEYCLOAK_REALM` | `quartermaster` | Realm that issues tokens. Optional when `QM_AUTH_DISABLED=true`. |
+| `QM_RESOURCE_BASE_URL` | `https://qm.example.com` | Public origin (scheme + host) as the browser/agent reaches it. Drives OAuth metadata and SPA redirect URIs. Required even in auth-less mode. |
 | `QM_KITS_ROOT` | `/data/kits` | Path to the mounted catalog. Defaulted to `/data/kits` **in the image**, so in practice you only mount the volume. |
 
 Everything else is optional and has a safe default. The inference settings
 are covered in §4–§5.
+
+### Running without authentication (trusted environments only)
+
+For a laptop, a locked-down internal network, or plain day-to-day feature
+development, standing up Keycloak is friction you may not want. Set
+**`QM_AUTH_DISABLED=true`** to run **fully auth-less**:
+
+- The JWT auth middleware and the User-Agent registration gate are **not
+  installed** — every `/api`, `/kits`, and `/dav` request is accepted with no
+  token and no client registration.
+- Every caller is treated as a **single synthetic local `editor`** (subject
+  `local`), so kit CRUD, role management, and WebDAV writes all work.
+- The OIDC discovery routes (`/.well-known/oauth-*`) are not served, and the
+  web UI skips the login flow entirely (it loads straight to the catalog).
+- `QM_KEYCLOAK_URL` / `QM_KEYCLOAK_REALM` become optional; the server logs a
+  loud `AUTH DISABLED` warning at startup.
+
+```bash
+docker run -d --name quartermaster -p 8000:8000 \
+  -e QM_AUTH_DISABLED=true \
+  -e QM_RESOURCE_BASE_URL=http://localhost:8000 \
+  -v qm-data:/data \
+  -v /srv/kit-catalog:/data/kits \
+  ghcr.io/exhuma/quartermaster:stable
+```
+
+> **Never set `QM_AUTH_DISABLED` in a production or internet-exposed
+> deployment.** It turns off *all* authentication and authorization; anyone who
+> can reach the port has full editor access. This is distinct from the dev-auth
+> *bypass* (`QM_DEV_AUTH_ENABLED`), which keeps auth on but lets you mint local
+> HS256 tokens to exercise the real auth path.
 
 ---
 

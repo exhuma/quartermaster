@@ -35,12 +35,33 @@ def integration() -> dict[str, Any]:
     Return the data the web UI's integration page needs.
 
     :returns: Server origin, MCP URL, Keycloak/OAuth discovery details,
-        the SPA public client id, and which auth modes are enabled.
+        the SPA public client id, and which auth modes are enabled. In
+        auth-less mode the Keycloak fields are null and ``auth_disabled`` is
+        true — the client presents no token.
     """
     settings = get_settings()
+    if settings.auth_disabled:
+        return {
+            "server_origin": settings.server_origin,
+            "mcp_url": f"{settings.server_origin}/kits/mcp",
+            "auth_disabled": True,
+            "keycloak_issuer": None,
+            "keycloak_realm": None,
+            "webui_client_id": None,
+            "oauth_scopes": [],
+            "oauth_metadata_url": None,
+            "authorization_endpoint": None,
+            "token_endpoint": None,
+            "copilot_auth_enabled": False,
+            "api_media_type": VENDOR_MEDIA_TYPE,
+            "client_registration_url": (
+                f"{settings.server_origin}/api/clients"
+            ),
+        }
     return {
         "server_origin": settings.server_origin,
         "mcp_url": f"{settings.server_origin}/kits/mcp",
+        "auth_disabled": False,
         "keycloak_issuer": settings.keycloak_issuer,
         "keycloak_realm": settings.keycloak_realm,
         "webui_client_id": settings.webui_keycloak_client_id,

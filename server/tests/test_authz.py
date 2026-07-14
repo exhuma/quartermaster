@@ -137,3 +137,29 @@ def test_role_store_persists_to_toml(client: TestClient) -> None:
     )
     path = get_settings().role_store_path
     assert role_store.get_role(path, "persisted") == "editor"
+
+
+def test_is_editor_true_for_everyone_when_auth_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auth-less mode: any caller resolves to editor (single trusted operator).
+
+    No role-store entry is needed — the synthetic local caller has full access
+    so REST mutations and the WebDAV write gate all pass.
+    """
+    from app.authz import is_editor
+
+    monkeypatch.setenv("QM_AUTH_DISABLED", "true")
+    monkeypatch.setenv("QM_KEYCLOAK_URL", "")
+    monkeypatch.setenv("QM_KEYCLOAK_REALM", "")
+    monkeypatch.setenv("QM_RESOURCE_BASE_URL", "http://localhost:8000")
+    monkeypatch.setenv("QM_ROLE_STORE_PATH", str(tmp_path / "roles.toml"))
+    get_settings.cache_clear()
+    try:
+        assert is_editor("local") is True
+        assert is_editor("some-random-unknown-sub") is True
+        # An empty subject is still not an editor (fail-closed on no identity).
+        assert is_editor("") is False
+        assert is_editor(None) is False
+    finally:
+        get_settings.cache_clear()

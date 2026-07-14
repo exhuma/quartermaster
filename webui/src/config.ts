@@ -11,6 +11,7 @@
 // importable in tests that assert runtime-vs-fallback precedence.
 
 interface RuntimeConfig {
+  authDisabled?: boolean
   oidcAuthority?: string
   oidcClientId?: string
   oidcRedirectUri?: string
@@ -38,6 +39,13 @@ export const devAuth: boolean =
   import.meta.env.DEV && import.meta.env.VITE_DEV_AUTH === 'true'
 
 const runtime: RuntimeConfig = window.__APP_CONFIG__ ?? {}
+
+// Fully auth-less mode for trusted environments (backend QM_AUTH_DISABLED).
+// Unlike `devAuth`, this IS read from the runtime-config global: it is a
+// legitimate deployment mode the server advertises via /config.js, not a
+// build-time dev escape hatch. When true the SPA skips OIDC entirely — no
+// login redirect, no token, no required Keycloak config.
+export const authDisabled: boolean = runtime.authDisabled === true
 
 export const oidcAuthority =
   runtime.oidcAuthority || (import.meta.env.VITE_OIDC_AUTHORITY as string)
@@ -73,6 +81,11 @@ export function requiredConfigErrors(): string[] {
 }
 
 export function assertRequiredConfig(): void {
+  // Auth-less deployments have no Keycloak authority/client id — there is
+  // nothing to assert, and demanding them would break the mode.
+  if (authDisabled) {
+    return
+  }
   const missing = requiredConfigErrors()
   if (missing.length > 0) {
     throw new Error(`Missing required runtime config: ${missing.join(', ')}`)

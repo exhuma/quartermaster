@@ -244,10 +244,17 @@ class Settings(BaseSettings):
     Required variables must be present; optional variables fall back to
     the declared default.
 
+    :param auth_disabled: When true, run fully auth-less (all authentication
+        and authorization off) for trusted environments — the JWT middleware
+        and User-Agent gate are not installed, every caller is a single
+        synthetic local editor, and the OIDC well-known routes are not served.
+        Makes ``keycloak_url``/``keycloak_realm`` optional. **Never enable in
+        production.** Defaults false; logs a loud startup warning when on.
     :param keycloak_url: Base URL of the Keycloak server,
         e.g. ``https://auth.example.com``.  Trailing slash is stripped
-        automatically.
+        automatically.  Required unless ``auth_disabled`` is true.
     :param keycloak_realm: Name of the Keycloak realm that issues tokens.
+        Required unless ``auth_disabled`` is true.
     :param keycloak_audience: If set, the ``aud`` claim in incoming JWTs
         must contain this value.  Leave unset to skip audience validation
         (useful when service-account tokens do not carry an explicit
@@ -445,8 +452,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    keycloak_url: str
-    keycloak_realm: str
+    # Keycloak is required for the normal (authenticated) deployment, but
+    # optional when auth is disabled (``auth_disabled`` below). The
+    # ``_validate_kit_config`` model validator enforces their presence only
+    # when auth is on, so a trusted no-auth deployment needs no IdP at all.
+    keycloak_url: str | None = None
+    keycloak_realm: str | None = None
     keycloak_audience: str | None = None
     tls_ca_bundle: Path | None = None
     tls_insecure_skip_verify: bool = False
@@ -470,6 +481,14 @@ class Settings(BaseSettings):
     dav_require_tls: bool = True
     webui_dist: Path = _WEBUI_DIST_DEFAULT
     docs_dist: Path = _DOCS_DIST_DEFAULT
+    # Fully auth-less mode for trusted environments. When true, ALL
+    # authentication and authorization are turned off: the JWT middleware and
+    # the User-Agent gate are not installed, every caller is treated as a
+    # single synthetic local editor, and the OIDC well-known routes are not
+    # served. Keycloak config becomes optional (see the validator). Defaults
+    # off; the app logs a loud warning at startup when it is on. **For trusted
+    # environments only — never enable in production.**
+    auth_disabled: bool = False
     # Dev-only auth bypass (module-dev-auth-bypass). Both default off; never
     # set in production. dev_shared_secret has NO default — an unset secret
     # is what makes HS256 rejection the safe default.
@@ -581,6 +600,25 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
+    def _validate_auth_config(self) -> Settings:
+        """Require Keycloak config unless auth is disabled.
+
+        ``keycloak_url``/``keycloak_realm`` are optional at the field level so a
+        trusted ``QM_AUTH_DISABLED=true`` deployment needs no IdP. When auth is
+        on (the default), both are mandatory — enforced here so the failure is a
+        clear config error at startup rather than a broken JWKS client later.
+        """
+        if not self.auth_disabled and (
+            not self.keycloak_url or not self.keycloak_realm
+        ):
+            raise ValueError(
+                "QM_KEYCLOAK_URL and QM_KEYCLOAK_REALM are required unless "
+                "QM_AUTH_DISABLED=true (auth-less mode for trusted "
+                "environments only)."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_kit_config(self) -> Settings:
         """Ensure a kit root is configured with a writable layer."""
         if self.kit_layers_file is not None:
@@ -645,8 +683,11 @@ class Settings(BaseSettings):
         """
         JWKS endpoint for the configured Keycloak realm.
 
-        :returns: Full JWKS URL string.
+        :returns: Full JWKS URL string, or ``""`` when Keycloak is unset
+            (auth-less mode — the JWKS client is never constructed then).
         """
+        if not self.keycloak_url:
+            return ""
         base = self.keycloak_url.rstrip("/")
         return (
             f"{base}/realms/{self.keycloak_realm}"
@@ -661,8 +702,11 @@ class Settings(BaseSettings):
 
         Used only for JWT validation; never advertised to OAuth clients.
 
-        :returns: Issuer URL string.
+        :returns: Issuer URL string, or ``""`` when Keycloak is unset
+            (auth-less mode).
         """
+        if not self.keycloak_url:
+            return ""
         base = self.keycloak_url.rstrip("/")
         return f"{base}/realms/{self.keycloak_realm}"
 
@@ -701,8 +745,10 @@ class Settings(BaseSettings):
         """
         Keycloak authorization endpoint for the configured realm.
 
-        :returns: Full authorization endpoint URL.
+        :returns: Full authorization endpoint URL, or ``""`` in auth-less mode.
         """
+        if not self.keycloak_issuer:
+            return ""
         return f"{self.keycloak_issuer}/protocol/openid-connect/auth"
 
     @computed_field  # type: ignore[prop-decorator]
@@ -711,8 +757,10 @@ class Settings(BaseSettings):
         """
         Keycloak token endpoint for the configured realm.
 
-        :returns: Full token endpoint URL.
+        :returns: Full token endpoint URL, or ``""`` in auth-less mode.
         """
+        if not self.keycloak_issuer:
+            return ""
         return f"{self.keycloak_issuer}/protocol/openid-connect/token"
 
 @lru_cache(maxsize=1)

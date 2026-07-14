@@ -51,4 +51,24 @@ describe('runtime config', () => {
       /Missing required runtime config/
     )
   })
+
+  it('authDisabled is off by default', async () => {
+    const cfg = await import('@/config')
+    expect(cfg.authDisabled).toBe(false)
+  })
+
+  it('authDisabled reads from the runtime global', async () => {
+    vi.stubGlobal('__APP_CONFIG__', { authDisabled: true })
+    const cfg = await import('@/config')
+    expect(cfg.authDisabled).toBe(true)
+  })
+
+  it('assertRequiredConfig is a no-op when auth is disabled', async () => {
+    // No Keycloak values at all, but the auth-less flag makes them unneeded.
+    vi.stubEnv('VITE_OIDC_AUTHORITY', '')
+    vi.stubEnv('VITE_OIDC_CLIENT_ID', '')
+    vi.stubGlobal('__APP_CONFIG__', { authDisabled: true })
+    const cfg = await import('@/config')
+    expect(() => cfg.assertRequiredConfig()).not.toThrow()
+  })
 })

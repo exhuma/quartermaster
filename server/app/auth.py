@@ -160,6 +160,41 @@ def _set_identity(request: Request, sub: str, label: str) -> None:
     request.state.auth_label = label
 
 
+# Synthetic caller used when authentication is disabled (``QM_AUTH_DISABLED``).
+# The whole deployment is a single trusted local operator; this stable subject
+# is what metrics attribution, per-user memory, and the ``/api/me`` label key
+# on, and it resolves to ``editor`` via ``app.authz.is_editor`` (which special-
+# cases auth-less mode), so every surface behaves as a full-access user.
+ANONYMOUS_SUBJECT = "local"
+ANONYMOUS_LABEL = "local"
+
+
+class NoAuthMiddleware(BaseHTTPMiddleware):
+    """Middleware for auth-less mode: stamp a synthetic identity, no token work.
+
+    Installed **instead of** :class:`JWTAuthMiddleware` when
+    ``settings.auth_disabled`` is true (see ``app.main.create_app``). It never
+    validates a token or constructs a JWKS client — it simply records the fixed
+    :data:`ANONYMOUS_SUBJECT` on every request so downstream consumers (the MCP
+    identity bridge, REST routers, role checks) see a consistent caller. For
+    trusted environments only; the app warns loudly at startup when enabled.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        """Bind the synthetic local identity and pass the request through.
+
+        :param request: Incoming HTTP request.
+        :param call_next: Next middleware or route handler.
+        :returns: The downstream response.
+        """
+        _set_identity(request, ANONYMOUS_SUBJECT, ANONYMOUS_LABEL)
+        return await call_next(request)
+
+
 class IDPUnavailableError(Exception):
     """Raised when the identity provider token endpoint is unavailable."""
 

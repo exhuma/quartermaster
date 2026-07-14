@@ -52,7 +52,16 @@ def runtime_config(settings: Settings) -> dict[str, Any]:
     :returns: The ``window.__APP_CONFIG__`` shape (public values only).
     """
     origin = settings.server_origin
+    # Auth-less mode: the SPA skips OIDC entirely, so advertise only the flag
+    # (and never read the now-optional Keycloak config). See ``config.ts``.
+    if settings.auth_disabled:
+        return {
+            "authDisabled": True,
+            # Same-origin: the SPA calls relative ``/api`` paths.
+            "apiBaseUrl": "",
+        }
     return {
+        "authDisabled": False,
         "oidcAuthority": settings.keycloak_issuer,
         "oidcClientId": settings.webui_keycloak_client_id,
         "oidcRedirectUri": f"{origin}/auth/callback",

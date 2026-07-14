@@ -4,7 +4,7 @@ import './styles/app.css'
 import App from './App.vue'
 import router from './router'
 import vuetify from './plugins/vuetify'
-import { assertRequiredConfig, devAuth } from './config'
+import { assertRequiredConfig, authDisabled, devAuth } from './config'
 import {
   setAuthSuccessHandler,
   setTokenProvider,
@@ -14,7 +14,13 @@ import { userManager } from './auth/oidc'
 import { handleUnauthorized, notifyAuthSuccess } from './auth/reauthGuard'
 
 async function bootstrap(): Promise<void> {
-  if (devAuth) {
+  if (authDisabled) {
+    // Auth-less mode: no OIDC, no token, no re-auth loop. Send no bearer token
+    // (the backend enforces nothing) and neutralize the 401 handler so a stray
+    // 401 never redirects to a nonexistent IdP.
+    setTokenProvider({ getToken: () => null })
+    setUnauthorizedHandler(() => {})
+  } else if (devAuth) {
     // Dev-only bypass. The dynamic import sits inside a branch gated by the
     // compile-time `devAuth` literal, so a production build removes this
     // branch and never bundles the dev-login helper.
