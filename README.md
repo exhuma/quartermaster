@@ -543,9 +543,10 @@ to `.env`, but the table below is the authoritative reference.
 
 | Name | Required | Purpose | Default |
 |---|---|---|---|
-| `QM_KEYCLOAK_URL` | Yes | Base URL of Keycloak (no trailing slash). | — |
-| `QM_KEYCLOAK_REALM` | Yes | Realm that issues tokens. | — |
-| `QM_RESOURCE_BASE_URL` | Yes | Public origin (scheme + host) as reached by the browser; drives OAuth metadata and the SPA redirect URIs. | — |
+| `QM_AUTH_DISABLED` | No | **Trusted environments only — never set in production.** Run fully auth-less: no JWT middleware, no User-Agent gate, every caller is a synthetic local editor, OIDC discovery off. Makes the two `QM_KEYCLOAK_*` vars optional. | `false` |
+| `QM_KEYCLOAK_URL` | Yes† | Base URL of Keycloak (no trailing slash). †Optional when `QM_AUTH_DISABLED=true`. | — |
+| `QM_KEYCLOAK_REALM` | Yes† | Realm that issues tokens. †Optional when `QM_AUTH_DISABLED=true`. | — |
+| `QM_RESOURCE_BASE_URL` | Yes | Public origin (scheme + host) as reached by the browser; drives OAuth metadata and the SPA redirect URIs. Required even in auth-less mode. | — |
 | `QM_KEYCLOAK_AUDIENCE` | No | Expected `aud` claim; unset skips audience validation. | unset (no audience check) |
 | `QM_KITS_ROOT` | No* | Kit catalog directory. Required at runtime (the catalog is external). | `/data/kits` (Docker image) |
 | `QM_CLIENT_REGISTRY_PATH` | No | Registered-client state file. | `/data/client_registry.json` (Docker image) |

@@ -10,7 +10,7 @@ from typing import cast
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.auth import IDPUnavailableError, JWTAuthMiddleware, _build_ssl_context
@@ -68,6 +68,42 @@ def _client(settings: SimpleNamespace) -> TestClient:
         settings=cast(Settings, settings),
     )
     return TestClient(app)
+
+
+def _noauth_client() -> TestClient:
+    """Build an app wrapped by NoAuthMiddleware (auth-less mode)."""
+    from app.auth import NoAuthMiddleware
+
+    app = FastAPI()
+
+    @app.get("/api/protected")
+    async def protected(request: Request) -> dict[str, str]:
+        return {
+            "sub": getattr(request.state, "auth_sub", ""),
+            "label": getattr(request.state, "auth_label", ""),
+            "subject": getattr(request.state, "auth_subject", ""),
+        }
+
+    app.add_middleware(NoAuthMiddleware)
+    return TestClient(app)
+
+
+def test_noauth_middleware_allows_protected_without_token() -> None:
+    """Auth-less mode: protected routes are reachable with no credentials."""
+    client = _noauth_client()
+    response = client.get("/api/protected")
+    assert response.status_code == 200
+
+
+def test_noauth_middleware_stamps_synthetic_identity() -> None:
+    """Auth-less mode: every request carries the fixed local identity."""
+    from app.auth import ANONYMOUS_LABEL, ANONYMOUS_SUBJECT
+
+    client = _noauth_client()
+    body = client.get("/api/protected").json()
+    assert body["sub"] == ANONYMOUS_SUBJECT
+    assert body["label"] == ANONYMOUS_LABEL
+    assert body["subject"] == ANONYMOUS_SUBJECT
 
 
 def test_public_health_path_skips_auth() -> None:

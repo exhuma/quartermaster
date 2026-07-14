@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 from app import health as health_probes
 from app import telemetry
-from app.auth import JWTAuthMiddleware
+from app.auth import JWTAuthMiddleware, NoAuthMiddleware
 from app.authz import EditorRequiredError, PrivateKitAccessError
 from app.changelog import load_changelog_json
 from app.config import get_settings
@@ -1279,6 +1279,15 @@ def create_app() -> FastAPI:
     except ValidationError:
         pass
 
+    # Auth-less mode gate (QM_AUTH_DISABLED). Read from the environment directly
+    # — like the dev-auth gate below — so the decision never depends on a fully
+    # validated Settings object (which is exactly what auth-less mode relaxes).
+    auth_disabled = os.environ.get("QM_AUTH_DISABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     mcp_app = mcp.http_app(path="/mcp")
 
     @contextlib.asynccontextmanager
@@ -1328,21 +1337,25 @@ def create_app() -> FastAPI:
     application.add_api_route(
         "/healthz", health_probes.healthz, methods=["GET"]
     )
-    application.add_api_route(
-        "/.well-known/oauth-protected-resource",
-        oauth_protected_resource_metadata,
-        methods=["GET"],
-    )
-    application.add_api_route(
-        "/.well-known/oauth-protected-resource/{path:path}",
-        oauth_protected_resource_metadata_path,
-        methods=["GET"],
-    )
-    application.add_api_route(
-        "/.well-known/oauth-authorization-server",
-        oauth_authorization_server_metadata,
-        methods=["GET"],
-    )
+    # OAuth discovery docs describe how to authenticate against Keycloak, so
+    # they are meaningless (and read now-optional Keycloak config) in auth-less
+    # mode — skip registering them so they 404 like any other unknown path.
+    if not auth_disabled:
+        application.add_api_route(
+            "/.well-known/oauth-protected-resource",
+            oauth_protected_resource_metadata,
+            methods=["GET"],
+        )
+        application.add_api_route(
+            "/.well-known/oauth-protected-resource/{path:path}",
+            oauth_protected_resource_metadata_path,
+            methods=["GET"],
+        )
+        application.add_api_route(
+            "/.well-known/oauth-authorization-server",
+            oauth_authorization_server_metadata,
+            methods=["GET"],
+        )
 
     # /api admin + integration + client-registration routers (protected
     # by the JWT + User-Agent middleware).
@@ -1417,8 +1430,22 @@ def create_app() -> FastAPI:
     #   UserAgent        - rejects unregistered non-browser clients before any
     #                      token work (clear pointer to the registration route).
     #   JWTAuth          - validates the bearer token (innermost).
-    application.add_middleware(JWTAuthMiddleware)
-    application.add_middleware(UserAgentMiddleware)
+    #
+    # Auth-less mode (QM_AUTH_DISABLED) swaps the innermost JWT middleware for
+    # NoAuthMiddleware (which stamps a synthetic local editor and does no token
+    # work) and drops the User-Agent gate entirely — the two auth/auth surfaces
+    # a trusted environment wants off. Everything outside stays identical.
+    if auth_disabled:
+        logger.warning(
+            "AUTH DISABLED: all authentication and authorization are OFF "
+            "(QM_AUTH_DISABLED). Every caller is a synthetic local editor. "
+            "For trusted environments only — never set QM_AUTH_DISABLED in "
+            "production."
+        )
+        application.add_middleware(NoAuthMiddleware)
+    else:
+        application.add_middleware(JWTAuthMiddleware)
+        application.add_middleware(UserAgentMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
     application.add_middleware(VersionHeaderMiddleware, version=app_version())
     application.add_middleware(RequestLoggingMiddleware)

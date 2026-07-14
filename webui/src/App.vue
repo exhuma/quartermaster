@@ -6,6 +6,7 @@ import { useLoading } from '@/composables/useLoading'
 import { useMe } from '@/composables/useMe'
 import { useThemeMode } from '@/composables/useThemeMode'
 import { authError, retryAuthentication } from '@/auth/reauthGuard'
+import { authDisabled } from '@/config'
 import BuildMeta from '@/components/BuildMeta.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 
@@ -95,7 +96,15 @@ watch(
         Changelog
       </v-btn>
 
-      <template v-if="isAuthenticated">
+      <!-- Auth-less mode: no sign-in/out — just a static, non-interactive
+           indicator of the synthetic local caller. -->
+      <span
+        v-if="authDisabled"
+        class="mr-2 text-body-2 font-mono text-on-surface-variant"
+      >
+        {{ displayName }}
+      </span>
+      <template v-else-if="isAuthenticated">
         <span class="mr-2 text-body-2 font-mono text-on-surface-variant">
           {{ displayName }}
         </span>
@@ -135,8 +144,13 @@ watch(
     </v-main>
 
     <!-- Re-auth loop guard: shown when a fresh token is still rejected, so the
-         user sees a clear error instead of an endless redirect loop. -->
-    <v-dialog :model-value="authError !== null" persistent max-width="480">
+         user sees a clear error instead of an endless redirect loop. Never
+         shown in auth-less mode, where there is no token flow to fail. -->
+    <v-dialog
+      :model-value="!authDisabled && authError !== null"
+      persistent
+      max-width="480"
+    >
       <v-card title="Authentication failed">
         <v-card-text>{{ authError }}</v-card-text>
         <v-card-actions>

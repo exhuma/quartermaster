@@ -2,13 +2,18 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 
 import { userManager } from '@/auth/oidc'
-import { devAuth } from '@/config'
+import { authDisabled, devAuth } from '@/config'
 
 // Protected routes require a live OIDC session. Store the target path as
 // `state` so the callback can return the user there after login. Exported
 // so it can be unit-tested without driving a full navigation.
 export async function authGuard(to: RouteLocationNormalized): Promise<boolean> {
   if (to.meta.requiresAuth) {
+    // Auth-less mode: no OIDC session exists and none is needed, so every
+    // protected route is freely navigable (the backend enforces nothing).
+    if (authDisabled) {
+      return true
+    }
     // Dev-only bypass: `devAuth` folds to literal `false` in production, so
     // this short-circuit is removed from the production build entirely.
     if (devAuth) {

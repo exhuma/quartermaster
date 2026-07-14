@@ -40,6 +40,10 @@ def is_editor(sub: str | None) -> bool:
         settings = get_settings()
     except Exception:  # noqa: BLE001 - absent config → deny, never crash
         return False
+    # Auth-less mode: the whole deployment is one trusted local operator, so the
+    # synthetic caller has full (editor) access without seeding the role store.
+    if settings.auth_disabled:
+        return True
     role = role_store.get_role(
         settings.role_store_path,
         sub,
