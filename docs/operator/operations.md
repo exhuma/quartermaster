@@ -75,11 +75,13 @@ docker run -d --name quartermaster -p 8000:8000 \
   ghcr.io/exhuma/quartermaster:stable
 ```
 
-> **Never set `QM_AUTH_DISABLED` in a production or internet-exposed
-> deployment.** It turns off *all* authentication and authorization; anyone who
-> can reach the port has full editor access. This is distinct from the dev-auth
-> *bypass* (`QM_DEV_AUTH_ENABLED`), which keeps auth on but lets you mint local
-> HS256 tokens to exercise the real auth path.
+:::{danger}
+**Never set `QM_AUTH_DISABLED` in a production or internet-exposed
+deployment.** It turns off *all* authentication and authorization; anyone who
+can reach the port has full editor access. This is distinct from the dev-auth
+*bypass* (`QM_DEV_AUTH_ENABLED`), which keeps auth on but lets you mint local
+HS256 tokens to exercise the real auth path.
+:::
 
 ---
 
@@ -110,10 +112,12 @@ docker run -d --name quartermaster -p 8000:8000 \
   ghcr.io/exhuma/quartermaster:stable
 ```
 
-> The bind-mount over `/data/kits` shadows that subpath of the named volume —
-> intentional, so your catalog is managed separately from generated state.
-> Ensure both are writable by uid 1001 (`chown -R 1001:1001 /srv/kit-catalog`
-> for the bind mount).
+:::{note}
+The bind-mount over `/data/kits` shadows that subpath of the named volume —
+intentional, so your catalog is managed separately from generated state.
+Ensure both are writable by uid 1001 (`chown -R 1001:1001 /srv/kit-catalog`
+for the bind mount).
+:::
 
 ---
 
@@ -123,10 +127,12 @@ This is the recommended first deployment of the new `resolve_kits` tool: a
 **local embedding model**, no external services, fully self-hosted. It is on
 by default and needs no setup — the model is baked into the image.
 
-> The published image bakes in the embedding model, so first use needs no
-> network egress and no writable cache volume. An older image that predates this
-> feature silently degrades to the lexical floor — pull a version that ships it
-> (this feature version or newer).
+:::{important}
+The published image bakes in the embedding model, so first use needs no
+network egress and no writable cache volume. An older image that predates this
+feature silently degrades to the lexical floor — pull a version that ships it
+(this feature version or newer).
+:::
 
 ### Settings
 
@@ -181,17 +187,21 @@ Operational signals:
   works — it has degraded to the deterministic lexical floor — but you are not
   getting semantic matching.
 
-> **No cold start:** the embedding model ships inside the image, so the first
-> `resolve_kits` after a fresh deploy only pays the in-process model *load*, not
-> a download. Do not point `QM_EMBEDDINGS_CACHE_DIR` at the `/data` volume — a
-> bind mount there masks the baked model and reintroduces a download.
->
-> That model *load* still costs a few seconds, and the server pays it **during
-> startup** — it warms the model before reporting ready, so no user request eats
-> the delay. Expect the container to sit briefly between the
-> `warming embedding model at startup; this may take a while…` log line and the
-> `embedding model warmed at startup` line that confirms it finished; that gap
-> is normal, not a stuck boot.
+:::{admonition} No cold start
+:class: note
+
+The embedding model ships inside the image, so the first
+`resolve_kits` after a fresh deploy only pays the in-process model *load*, not
+a download. Do not point `QM_EMBEDDINGS_CACHE_DIR` at the `/data` volume — a
+bind mount there masks the baked model and reintroduces a download.
+
+That model *load* still costs a few seconds, and the server pays it **during
+startup** — it warms the model before reporting ready, so no user request eats
+the delay. Expect the container to sit briefly between the
+`warming embedding model at startup; this may take a while…` log line and the
+`embedding model warmed at startup` line that confirms it finished; that gap
+is normal, not a stuck boot.
+:::
 
 ---
 
@@ -229,9 +239,11 @@ docker run -d --name quartermaster -p 8000:8000 \
   ghcr.io/exhuma/quartermaster:stable
 ```
 
-> If the LLM runs in another container, make sure both are on the same Docker
-> network so `QM_LLM_BASE_URL` resolves (e.g. `--network my-net` and use the
-> service name as the host).
+:::{tip}
+If the LLM runs in another container, make sure both are on the same Docker
+network so `QM_LLM_BASE_URL` resolves (e.g. `--network my-net` and use the
+service name as the host).
+:::
 
 ### Option B — Anthropic-native
 
