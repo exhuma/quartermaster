@@ -9,6 +9,15 @@ meta:
   version: "1.0"
 
 releases:
+  "2026.7.14":
+    date: 2026-07-14
+    notes: |
+      Quartermaster can now run fully without authentication for trusted
+      environments: set `QM_AUTH_DISABLED=true` to turn off all authentication
+      and authorization — no bearer token or client registration, every caller
+      a single local editor, and the web UI loads straight to the catalog with
+      no sign-in. Keycloak configuration becomes optional. Never enable it in
+      production.
   "2026.7.13":
     date: 2026-07-13
     notes: |

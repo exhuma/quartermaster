@@ -1,6 +1,29 @@
 # Changelog
 
 
+## Release 2026.7.14 (2026-07-14)
+
+Quartermaster can now run fully without authentication for trusted
+
+environments: set `QM_AUTH_DISABLED=true` to turn off all 
+authentication
+and authorization — no bearer token or client 
+registration, every caller
+a single local editor, and the web UI loads
+ straight to the catalog with
+no sign-in. Keycloak configuration 
+becomes optional. Never enable it in
+production.
+
+
+
+### Added
+- [Ops] Run fully without authentication for trusted environments *@
+  2026.7.14a1*
+
+  Setting `QM_AUTH_DISABLED=true` runs Quartermaster with all authentication and authorization turned off for trusted environments: the API, MCP, and WebDAV surfaces accept requests with no bearer token and no client registration, every caller is treated as a single local editor, and the web UI loads straight to the catalog with no sign-in. `QM_KEYCLOAK_URL`/`QM_KEYCLOAK_REALM` become optional. Never enable it in production.
+
+
 ## Release 2026.7.13 (2026-07-13)
 
 Kit authors can now evaluate how well a catalog resolves — measuring
