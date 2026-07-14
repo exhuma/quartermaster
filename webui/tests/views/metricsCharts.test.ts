@@ -5,7 +5,9 @@ import {
   catalogGrowthDomains,
   catalogGrowthOption,
   formatBucketUTC,
+  heatmapOption,
   tokensOption,
+  withChartTheme,
 } from '@/views/metricsCharts'
 import type { CatalogGrowth, TokenPoint } from '@/types/metrics'
 
@@ -222,5 +224,53 @@ describe('versionAdoptionOption', () => {
     const opt = versionAdoptionOption(empty, colors, '1d')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((opt.series as any[]).length).toBe(0)
+  })
+})
+
+describe('withChartTheme', () => {
+  // A theme colour record with the tokens the chrome sources.
+  const theme = {
+    primary: '#e9c176',
+    secondary: '#b7c8dd',
+    'on-surface': '#d4e4fa',
+    'on-surface-variant': '#d1c5b4',
+    outline: '#9a8f80',
+    'outline-variant': '#4e4639',
+  }
+
+  it('colours legend text and axis chrome from the theme', () => {
+    const themed = withChartTheme(
+      tokensOption([], theme, '1d'),
+      theme
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) as any
+    expect(themed.textStyle.color).toBe('#d4e4fa')
+    expect(themed.legend.textStyle.color).toBe('#d4e4fa')
+    expect(themed.xAxis.axisLabel.color).toBe('#d1c5b4')
+    expect(themed.yAxis.axisLabel.color).toBe('#d1c5b4')
+    expect(themed.yAxis.axisLine.lineStyle.color).toBe('#9a8f80')
+  })
+
+  it('preserves existing per-element styles (formatter, name)', () => {
+    const themed = withChartTheme(
+      tokensOption([], theme, '1h'),
+      theme
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) as any
+    // The tokens chart names its y-axis and keeps its legend entries.
+    expect(themed.yAxis.name).toBe('tokens')
+    expect(themed.legend.data).toContain('Delivered')
+    // The x-axis formatter (UTC bucket labels) survives decoration.
+    expect(typeof themed.xAxis.axisLabel.formatter).toBe('function')
+  })
+
+  it('themes the heatmap visualMap gradient labels', () => {
+    const heat = { kits: ['a', 'b'], cells: [{ x: 0, y: 1, value: 0.5 }] }
+    const themed = withChartTheme(
+      heatmapOption(heat, theme, 'structural'),
+      theme
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) as any
+    expect(themed.visualMap.textStyle.color).toBe('#d1c5b4')
   })
 })

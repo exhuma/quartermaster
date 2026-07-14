@@ -29,6 +29,56 @@ export function palette(c: Colors): string[] {
   return [c.primary, c.info, c.success, c.warning, c.secondary, c.error]
 }
 
+// ECharts' built-in chrome colours — axis labels, axis/tick lines, split
+// gridlines, legend text, the visualMap gradient labels — are a fixed dark
+// grey that disappears on a dark surface (legends read dark-on-dark). The
+// builders theme the *data* (series colours) but not this chrome, so it must
+// be sourced from the active Vuetify theme. Applied centrally in BaseChart so
+// every chart — current and future — stays legible in light and dark mode
+// without each builder repeating it. Existing per-element styles (formatter,
+// rotate, fontSize) are preserved; only colour is layered in.
+export function withChartTheme(
+  option: EChartsOption,
+  c: Colors
+): EChartsOption {
+  const text = c['on-surface']
+  const muted = c['on-surface-variant'] ?? text
+  const line = c.outline
+  const split = c['outline-variant'] ?? line
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const decorateAxis = (axis: any): any => ({
+    axisLine: { lineStyle: { color: line } },
+    axisTick: { lineStyle: { color: line } },
+    splitLine: { lineStyle: { color: split } },
+    ...axis,
+    axisLabel: { color: muted, ...(axis?.axisLabel ?? {}) },
+    nameTextStyle: { color: muted, ...(axis?.nameTextStyle ?? {}) },
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mapAxis = (a: any): any =>
+    Array.isArray(a) ? a.map(decorateAxis) : a ? decorateAxis(a) : a
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const decorateLegend = (l: any): any => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const one = (x: any) => ({ ...x, textStyle: { color: text, ...x?.textStyle } })
+    return Array.isArray(l) ? l.map(one) : l ? one(l) : l
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const themed: any = { textStyle: { color: text }, ...option }
+  if (option.xAxis) themed.xAxis = mapAxis(option.xAxis)
+  if (option.yAxis) themed.yAxis = mapAxis(option.yAxis)
+  if (option.legend) themed.legend = decorateLegend(option.legend)
+  if (option.visualMap) {
+    const vm = option.visualMap
+    themed.visualMap = Array.isArray(vm)
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vm.map((x: any) => ({ textStyle: { color: muted }, ...x }))
+      : { textStyle: { color: muted }, ...vm }
+  }
+  return themed as EChartsOption
+}
+
 const round = (n: number, dp = 1): number => Number(n.toFixed(dp))
 
 // Server bucket labels are UTC strings: "YYYY-MM-DD" (daily) or
