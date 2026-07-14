@@ -45,6 +45,9 @@ jobs:
         run: |
           channels="$(sh scripts/derive_channels.sh)"
           echo "channels=$channels" >> "$GITHUB_OUTPUT"
+          # The single most-mature channel this build advances, baked into the
+          # image (docs + catalog_evaluation prompt) so their image tags match.
+          echo "primary=$(sh scripts/derive_channels.sh --primary)" >> "$GITHUB_OUTPUT"
           # Render one `type=raw,value=<channel>` line per channel for the
           # docker/metadata-action `tags:` input below.
           {
@@ -100,6 +103,7 @@ jobs:
             VITE_GITHUB_REPO_URL=${{ github.server_url }}/${{ github.repository }}
             VITE_APP_COMMIT=${{ github.sha }}
             VITE_APP_BUILD_TIME=${{ steps.build-time.outputs.ts }}
+            APP_CHANNEL=${{ steps.channels.outputs.primary }}
           # Layer caching via the registry itself — no external cache service needed
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
