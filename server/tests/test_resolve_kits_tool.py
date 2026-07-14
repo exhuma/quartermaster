@@ -358,6 +358,45 @@ def test_low_confidence_no_reresolve_when_user_declines(monkeypatch) -> None:
     assert result["confidence"] == 0.1
 
 
+def test_clarification_block_suppresses_human_elicit(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    calls: list[str] = []
+
+    async def _fake_resolve_once(task, **kwargs):
+        calls.append(task)
+        return {
+            "engine": "lexical",
+            "kits": [],
+            "confidence": 0.1,
+            "broadening_recommended": True,
+            "inferred_traits": {
+                "languages": [],
+                "frameworks": [],
+                "capabilities": ["database"],
+                "contexts": [],
+            },
+            "clarification": {
+                "needed": True,
+                "reason": "pivotal-trait-missing",
+                "questions": [{"category": "languages"}],
+            },
+        }
+
+    async def _boom_elicit(ctx, message):
+        raise AssertionError(
+            "human elicitation must not run when a clarification block exists"
+        )
+
+    monkeypatch.setattr("app.main._resolve_once", _fake_resolve_once)
+    monkeypatch.setattr("app.main._elicit_text", _boom_elicit)
+    result = _run(
+        tool.fn(task="add a database", ctx=_FakeCtx(elicitation=True))
+    )
+    # Only one resolve, and the agent-facing block is returned untouched.
+    assert len(calls) == 1
+    assert result["clarification"]["reason"] == "pivotal-trait-missing"
+
+
 # ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
@@ -426,6 +465,37 @@ def test_include_diagnostics_attaches_diagnostics_block(monkeypatch) -> None:
         }
     ]
     assert "Quartermaster Insights" in diag["report_instruction"]
+    # No clarification block on this result.
+    assert diag["clarification_requested"] is False
+    assert diag["clarification_categories"] == []
+    assert diag["policy_kits"] == []
+
+
+def test_diagnostics_reports_clarification_requested(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+
+    def _result_with_clarification() -> dict:
+        result = _full_result()
+        result["kits"][0]["policy"] = True
+        result["clarification"] = {
+            "needed": True,
+            "reason": "pivotal-trait-missing",
+            "questions": [
+                {"category": "languages"},
+                {"category": "frameworks"},
+            ],
+        }
+        return result
+
+    monkeypatch.setattr(
+        "app.main._resolve_kits", lambda **k: _result_with_clarification()
+    )
+    result = _run(tool.fn(task="add a database", include_diagnostics=True))
+
+    diag = result["_diagnostics"]
+    assert diag["clarification_requested"] is True
+    assert diag["clarification_categories"] == ["languages", "frameworks"]
+    assert diag["policy_kits"] == ["module-auth-oidc"]
 
 
 def test_diagnostics_absent_by_default(monkeypatch) -> None:

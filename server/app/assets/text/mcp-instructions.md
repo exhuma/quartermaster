@@ -44,6 +44,24 @@ cannot know whether an already delivered section was "compacted away" by any
 context-compression actions, you may re-fetch and re-deliver a section if you
 deem it appropriate when you see a new request or reach that aspect.
 
+**Answer `clarification` blocks yourself, then re-resolve.** When `resolve_kits`
+returns a non-null `clarification` field, a pivotal project trait — usually the
+language — was missing, so several kits could not be confidently chosen (e.g.
+"add a database" without knowing whether the project is C# or Python). Do **not**
+immediately ask the user. For each `question`, follow its `hint` to inspect the
+repository (`*.csproj`→csharp, `pyproject.toml`→python, `package.json`→javascript
+or typescript, `go.mod`→go, …), pick the matching `option`, and re-call
+`resolve_kits` with the answer folded into `task` (e.g. append "(python;
+pyproject.toml present)"). Bounce a question to the human only when repo
+inspection is genuinely ambiguous. This keeps disambiguation autonomous and
+non-blocking, and once the trait is in `task` the question does not recur.
+
+**Kits flagged `policy: true` are mandatory baseline guidance, not optional** —
+apply them regardless of how well they match the specific task. A policy kit that
+also carries `policy_pending: true` was withheld because a required trait is still
+unknown; answering the accompanying `clarification` unlocks it on the next
+resolve.
+
 Use the manual loop below only when you need finer control: you have already
 mapped the task to explicit traits, you want to inspect ranking diagnostics,
 or you are loading several kits incrementally.

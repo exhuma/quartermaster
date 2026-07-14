@@ -142,6 +142,7 @@ def test_response_has_full_schema() -> None:
         "kits",
         "warnings",
         "gap",
+        "clarification",
     }
     traits = out["inferred_traits"]
     assert set(traits) >= {
@@ -254,6 +255,260 @@ def test_gap_suggested_title_is_truncated_for_long_tasks(
     out = resolver.resolve_kits(task=long_task)
     assert len(out["gap"]["suggested_title"]) <= 80
     assert out["gap"]["suggested_summary"] == long_task
+
+
+def _db_kit_requiring_language(base: Path, langs: list[str]) -> None:
+    """Write a database kit that hard-requires a language into *base*."""
+    _write_kit_version(
+        base,
+        "kit-db",
+        "v1",
+        summary="Database kit.",
+        sections=[
+            {
+                "file": "invariant.md",
+                "title": "Database invariants",
+                "gloss": "Non-negotiables for database access",
+                "always_load": True,
+                "body": "## Invariants\n\nUse migrations.\n",
+            },
+        ],
+    )
+    _write_manifest(
+        base,
+        "kit-db",
+        {
+            "kit_type": "module",
+            "summary": "Database access guidance.",
+            "domains": ["database"],
+            "languages": langs,
+            "frameworks": [],
+            "contexts": ["backend"],
+            "requires": {
+                "languages": langs,
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "excludes": {
+                "languages": [],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "optional_signals": [],
+            "related_kits": [],
+            "priority": 70,
+        },
+    )
+
+
+def test_clarification_surfaces_in_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.clarify import ClarifyQuestion, ClarifySignal
+
+    signal = ClarifySignal(
+        questions=[
+            ClarifyQuestion(
+                category="languages",
+                options=["csharp", "python"],
+                blocking_kits=["kit-db"],
+                why="kit-db requires a specific language.",
+            )
+        ],
+        reason="pivotal-trait-missing",
+    )
+    monkeypatch.setattr(resolver, "detect_clarification", lambda **_: signal)
+
+    out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
+    block = out["clarification"]
+    assert block is not None
+    assert block["needed"] is True
+    assert block["reason"] == "pivotal-trait-missing"
+    assert "how_to_answer" in block
+    question = block["questions"][0]
+    assert question["category"] == "languages"
+    assert question["options"] == ["csharp", "python"]
+    assert question["blocking_kits"] == ["kit-db"]
+    assert question["question"]  # human-facing text present
+    assert question["hint"]  # repo-inspection hint present
+
+
+def test_clarification_not_run_when_no_inference() -> None:
+    # Mutual exclusion with the gap path: when nothing is inferred, the
+    # clarification detector must not even run (gap detection handles it).
+    def _boom(**kwargs):
+        raise AssertionError(
+            "detect_clarification must not run when nothing was inferred"
+        )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(resolver, "detect_clarification", _boom)
+        mp.setattr(resolver, "detect_gap", lambda **_: None)
+        out = resolver.resolve_kits(task="train a pytorch model on GPUs")
+    assert out["clarification"] is None
+
+
+def _enable_clarification(monkeypatch: pytest.MonkeyPatch) -> None:
+    # get_settings() ValidationErrors in the test env (Keycloak vars unset),
+    # so the detector would treat the feature as off — mirror test_gap and
+    # stub the settings it reads. Production has real settings.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.clarify.get_settings",
+        lambda: SimpleNamespace(
+            clarification_enabled=True,
+            clarification_max_questions=2,
+            clarification_min_blocking_kits=1,
+        ),
+    )
+
+
+def test_clarification_end_to_end_for_missing_language(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A db kit hard-requires a language; the task infers the `database`
+    # capability but no language -> a real clarification for `languages`.
+    _enable_clarification(monkeypatch)
+    _db_kit_requiring_language(kit_root, ["python", "csharp"])
+    out = resolver.resolve_kits(task="add a database")
+    assert out["inferred_traits"]["capabilities"] == ["database"]
+    assert out["inferred_traits"]["languages"] == []
+    block = out["clarification"]
+    assert block is not None
+    categories = [q["category"] for q in block["questions"]]
+    assert "languages" in categories
+    lang_q = next(q for q in block["questions"] if q["category"] == "languages")
+    assert lang_q["options"] == ["csharp", "python"]
+
+
+def test_clarification_cleared_once_language_folded_in(
+    kit_root: Path,
+) -> None:
+    # The loop-breaker: re-resolving with the language in the task clears the
+    # clarification (the dimension is now inferred).
+    _db_kit_requiring_language(kit_root, ["python", "csharp"])
+    out = resolver.resolve_kits(task="add a database using python")
+    assert "python" in out["inferred_traits"]["languages"]
+    assert out["clarification"] is None
+
+
+def test_policy_kit_injected_on_every_resolve(kit_root: Path) -> None:
+    # A global policy kit (always_apply, no requires) is delivered even for a
+    # task that does not match it on traits.
+    _write_kit_version(
+        kit_root,
+        "kit-policy",
+        "v1",
+        summary="Policy kit.",
+        sections=[
+            {
+                "file": "invariant.md",
+                "title": "Global policy",
+                "gloss": "Baseline rules for every project",
+                "always_load": True,
+                "body": "## Policy\n\nAlways sign commits.\n",
+            },
+        ],
+    )
+    _write_manifest(
+        kit_root,
+        "kit-policy",
+        {
+            "kit_type": "module",
+            "summary": "Baseline policy for every project.",
+            "domains": ["governance"],
+            "languages": [],
+            "frameworks": [],
+            "contexts": [],
+            "requires": {
+                "languages": [],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "excludes": {
+                "languages": [],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "optional_signals": [],
+            "related_kits": [],
+            "priority": 10,
+            "always_apply": True,
+        },
+    )
+    out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
+    by_name = {kit["name"]: kit for kit in out["kits"]}
+    assert "kit-policy" in by_name
+    assert by_name["kit-policy"]["policy"] is True
+    markdown = by_name["kit-policy"]["always_load_markdown"]
+    assert "Always sign commits" in markdown
+
+
+def test_pending_policy_kit_withholds_content(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A project-type policy kit that requires a language it doesn't know is
+    # surfaced as pending (no body) and drives a language clarification.
+    _enable_clarification(monkeypatch)
+    _write_kit_version(
+        kit_root,
+        "kit-py-policy",
+        "v1",
+        summary="Python policy kit.",
+        sections=[
+            {
+                "file": "invariant.md",
+                "title": "Python policy",
+                "gloss": "Baseline rules for Python projects",
+                "always_load": True,
+                "body": "## Policy\n\nUse ruff.\n",
+            },
+        ],
+    )
+    _write_manifest(
+        kit_root,
+        "kit-py-policy",
+        {
+            "kit_type": "module",
+            "summary": "Baseline policy for Python projects.",
+            "domains": ["governance"],
+            "languages": ["python"],
+            "frameworks": [],
+            "contexts": [],
+            "requires": {
+                "languages": ["python"],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "excludes": {
+                "languages": [],
+                "frameworks": [],
+                "capabilities": [],
+                "contexts": [],
+            },
+            "optional_signals": [],
+            "related_kits": [],
+            "priority": 10,
+            "always_apply": True,
+        },
+    )
+    # A task that infers a trait (so inference is non-empty and clarification
+    # runs) but no language: the python policy kit stays pending.
+    out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
+    assert out["inferred_traits"]["languages"] == []
+    by_name = {kit["name"]: kit for kit in out["kits"]}
+    assert "kit-py-policy" in by_name
+    pending = by_name["kit-py-policy"]
+    assert pending["policy_pending"] is True
+    assert pending["always_load_markdown"] == ""
+    # And the missing language is surfaced for clarification.
+    assert out["clarification"] is not None
 
 
 def test_lexical_infers_framework_from_task_text() -> None:

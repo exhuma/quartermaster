@@ -469,6 +469,20 @@ class Settings(BaseSettings):
     gap_detection_enabled: bool = True
     gap_recall_min_score: float = 0.30
     gap_lexical_min_overlap: int = 1
+    # Agent-in-the-loop clarification: when trait inference is partial but a
+    # pivotal required trait dimension is missing (e.g. "add a database" with no
+    # language), ``resolve_kits`` returns a structured ``clarification`` block
+    # for the calling agent to answer from repo inspection, then re-resolve —
+    # non-blocking, distinct from the human ``ctx.elicit`` path. See
+    # app/clarify.py.
+    clarification_enabled: bool = True
+    clarification_max_questions: int = 2
+    clarification_min_blocking_kits: int = 1
+    # Always-apply policy kits: a kit manifest may set ``always_apply: true`` so
+    # its ``always_load`` content is injected on every resolve whose gates it
+    # satisfies, bypassing the score threshold (see app/kits.select_kits_v2).
+    # This kill-switch disables that injection catalog-wide.
+    policy_enabled: bool = True
     # Per-user memory: a small, capped profile derived from each caller's own
     # resolve_kits history (see app/storage/user_memory.py), used only as a
     # bounded ranking nudge (app/personalization.py) — never a filter.
