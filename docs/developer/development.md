@@ -118,8 +118,10 @@ cd server
 uv run pytest
 ```
 
-> The real-catalog tests resolve the catalog from `QM_KITS_ROOT` and skip when
-> it is absent, so they pass even against an empty/decoupled checkout.
+:::{note}
+The real-catalog tests resolve the catalog from `QM_KITS_ROOT` and skip when
+it is absent, so they pass even against an empty/decoupled checkout.
+:::
 
 ## Optional GitHub integration
 

@@ -5,11 +5,13 @@ This release adds **authorization**. Two roles now exist — **`editor`**
 **`consumer`** (read-only, the default). It also adds **private kits**:
 standalone kits visible only to their owner.
 
-> **⚠️ Action required for existing deployments.** Writing to the shared
-> catalog now requires the **`editor`** role, and the default for every
-> authenticated user is **`consumer`** (read-only). Until you name at least one
-> editor via `QM_INITIAL_EDITORS`, **nobody can modify kits** through the REST
-> API or WebDAV. Reading kits over the MCP is unaffected.
+:::{warning}
+**Action required for existing deployments.** Writing to the shared
+catalog now requires the **`editor`** role, and the default for every
+authenticated user is **`consumer`** (read-only). Until you name at least one
+editor via `QM_INITIAL_EDITORS`, **nobody can modify kits** through the REST
+API or WebDAV. Reading kits over the MCP is unaffected.
+:::
 
 ---
 
@@ -100,11 +102,13 @@ a missed enumeration path cannot leak them. Users manage theirs from the
 **Private** screen in the web UI or the `/api/private-kits` API. No other user —
 and no public MCP caller — can see them.
 
-> **Confidentiality note.** Private kits are stored **server-readable** (so the
-> server can resolve them). This protects visibility between users, **not**
-> against a server operator. True end-to-end encryption is deliberately out of
-> scope here; the trade-offs are analysed in
-> [`server/docs/research/private-kits-e2ee.md`](https://github.com/exhuma/quartermaster/blob/main/server/docs/research/private-kits-e2ee.md).
+:::{important}
+**Confidentiality note.** Private kits are stored **server-readable** (so the
+server can resolve them). This protects visibility between users, **not**
+against a server operator. True end-to-end encryption is deliberately out of
+scope here; the trade-offs are analysed in
+[`server/docs/research/private-kits-e2ee.md`](https://github.com/exhuma/quartermaster/blob/main/server/docs/research/private-kits-e2ee.md).
+:::
 
 ---
 

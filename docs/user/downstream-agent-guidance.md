@@ -10,18 +10,22 @@ server's own codebase (see
 [`.ai/rules.md`](https://github.com/exhuma/quartermaster/blob/main/.ai/rules.md)). It is the short briefing a downstream project
 gives its agents so they drive Quartermaster well.
 
-> The detailed routine lives in **one** place — Quartermaster's
-> `trait_selection_bootstrap` prompt (fetch it with `list_prompts` →
-> `get_prompt`). Your `AGENTS.md` should *point at* that prompt, not restate
-> it, so the guidance can evolve server-side without every repo drifting out
-> of date.
+:::{note}
+The detailed routine lives in **one** place — Quartermaster's
+`trait_selection_bootstrap` prompt (fetch it with `list_prompts` →
+`get_prompt`). Your `AGENTS.md` should *point at* that prompt, not restate
+it, so the guidance can evolve server-side without every repo drifting out
+of date.
+:::
 
-> **Default to the one-shot path.** Quartermaster exposes `resolve_kits`,
-> which takes a plain-language task and returns the matching kits with their
-> core sections already inlined — the whole discovery loop in a single call.
-> Agents should reach for it first; the manual `select_kits` loop below is the
-> fallback for when traits are already known or finer control is needed. We saw
-> agents skip `resolve_kits` when it was framed as optional, so lead with it.
+:::{important}
+**Default to the one-shot path.** Quartermaster exposes `resolve_kits`,
+which takes a plain-language task and returns the matching kits with their
+core sections already inlined — the whole discovery loop in a single call.
+Agents should reach for it first; the manual `select_kits` loop below is the
+fallback for when traits are already known or finer control is needed. We saw
+agents skip `resolve_kits` when it was framed as optional, so lead with it.
+:::
 
 ## Why this guidance exists
 

@@ -94,7 +94,7 @@ docker run -d --name quartermaster -p 8000:8000 \
 When both are set, `QM_KIT_LAYERS_FILE` (multi-root) takes precedence over
 `QM_KITS_ROOT` (single-root):
 
-```
+```text
 QM_KIT_LAYERS_FILE  >  QM_KITS_ROOT
 ```
 
@@ -129,6 +129,31 @@ example above:
 
 `source_layer` on each kit (visible via `GET /api/kits/{name}` and
 `GET /api/kits/layers`) tells you which layer currently owns it.
+
+```mermaid
+flowchart TB
+  subgraph stack [Layer stack, base → overlay]
+    direction TB
+    company["company (base, readonly)<br/>owns kit-A, kit-B<br/>kit-B has a binding section"]
+    team["team (overlay)<br/>owns kit-B"]
+    company -->|higher layer wins| team
+  end
+
+  team ==>|"kit-B served from overlay"| served([Served kit-B])
+  company -.->|"binding section merged in"| served
+  company ==>|"kit-A: only here"| servedA([Served kit-A])
+
+  classDef base fill:#0072B2,color:#fff,stroke:#000;
+  classDef overlay fill:#E69F00,color:#000,stroke:#000;
+  classDef result fill:#009E73,color:#fff,stroke:#000;
+  class company base
+  class team overlay
+  class served,servedA result
+```
+
+A kit named in only one layer is served from that layer (`kit-A`). A kit in
+both is served from the overlay (`kit-B`), except for the base layer's binding
+sections, which are merged in (dashed edge).
 
 ### Binding sections (the `binding` flag)
 

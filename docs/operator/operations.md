@@ -34,6 +34,43 @@ Health probes (all unauthenticated):
 
 The MCP endpoint is served (authenticated) at `/kits/mcp`.
 
+The request pipeline: TLS terminates at your proxy, then **authentication
+terminates inside the app** — a User-Agent registration gate followed by the
+JWT/app-token middleware — before any request reaches a data surface. The web
+UI shell, `/config.js`, and the health probes stay public so the SPA can load
+and authenticate itself.
+
+```mermaid
+flowchart TB
+  client([Coding agent / browser])
+  proxy[TLS proxy: Traefik / nginx / LB]
+  client -->|HTTPS| proxy
+  proxy -->|"HTTP :8000 (data surfaces)"| ua
+
+  ua[User-Agent gate] --> jwt[JWT / app-token auth]
+  jwt -->|token valid| api[REST API &nbsp;/api]
+  jwt -->|token valid| mcp[MCP mount &nbsp;/kits/mcp]
+  jwt -->|Basic + app token| dav[WebDAV &nbsp;/dav]
+  jwt -->|401 / 403| reject[Rejected]
+
+  proxy -->|"no auth"| public[SPA shell · /config.js · /livez /readyz /healthz]
+
+  classDef gate fill:#E69F00,color:#000,stroke:#000,stroke-width:2px;
+  classDef protected fill:#0072B2,color:#fff,stroke:#000;
+  classDef open fill:#009E73,color:#fff,stroke:#000;
+  classDef stop fill:#D55E00,color:#fff,stroke:#000;
+  class ua,jwt gate
+  class api,mcp,dav protected
+  class public open
+  class reject stop
+```
+
+:::{note}
+Setting `QM_AUTH_DISABLED=true` removes both gate stages — every caller is a
+single local editor. See [Running without
+authentication](#running-without-authentication-trusted-environments-only).
+:::
+
 ---
 
 ## 2. Required environment variables
@@ -303,6 +340,26 @@ volumes:
 The fallback order is always **LLM → embeddings → lexical**; the first layer
 that yields any in-vocabulary trait wins. The lexical floor needs no
 configuration and never fails, so `resolve_kits` always returns a result.
+
+```mermaid
+flowchart TB
+  task([Task text]) --> sampling
+  sampling{MCP sampling<br/>or QM_LLM_*?} -->|traits found| done
+  sampling -->|unavailable / empty| embed
+  embed{Embeddings<br/>available?} -->|traits found| done
+  embed -->|unavailable / empty| lexical
+  lexical[Lexical floor<br/>always succeeds] --> done([Inferred traits])
+
+  classDef engine fill:#0072B2,color:#fff,stroke:#000;
+  classDef floor fill:#009E73,color:#fff,stroke:#000;
+  classDef result fill:#E69F00,color:#000,stroke:#000;
+  class sampling,embed engine
+  class lexical floor
+  class done result
+```
+
+The `engine` field in the response names which layer produced the result, so a
+drop to `lexical` is a visible signal that the richer engines were unavailable.
 
 ---
 

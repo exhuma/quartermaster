@@ -66,6 +66,8 @@ docs = [
     "furo",
     "sphinx-autodoc-typehints",
     "myst-parser",
+    "sphinx-copybutton",
+    "sphinxcontrib-mermaid",
 ]
 
 # Scope wheel discovery to the app package explicitly. Auto-discovery would

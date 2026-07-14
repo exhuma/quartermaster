@@ -34,6 +34,27 @@ is *at least* that mature. Derived by
 | `vYYYY.M.D-rc.N`       | `rc`                        |
 | `vYYYY.M.D` (no suffix)| `stable`, `beta`, `alpha`   |
 
+A more mature tag advances every less-mature channel too, so `:alpha` always
+points at the newest build of *any* maturity:
+
+```mermaid
+flowchart LR
+  stableTag["Tag: vY.M.D<br/>(stable)"] -->|moves| cStable[":stable"]
+  stableTag -->|moves| cBeta[":beta"]
+  stableTag -->|moves| cAlpha[":alpha"]
+  betaTag["Tag: -beta.N"] -->|moves| cBeta
+  betaTag -->|moves| cAlpha
+  alphaTag["Tag: -alpha.N"] -->|moves| cAlpha
+
+  classDef tag fill:#E69F00,color:#000,stroke:#000;
+  classDef channel fill:#0072B2,color:#fff,stroke:#000;
+  class stableTag,betaTag,alphaTag tag
+  class cStable,cBeta,cAlpha channel
+```
+
+(An `-rc.N` tag moves only `:rc`, kept off the cascade so a release candidate
+never advances the `:beta`/`:alpha` a tester tracks.)
+
 So operators can track a channel and pull the latest build at that maturity:
 
 ```bash
