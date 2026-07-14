@@ -19,7 +19,7 @@ ship](#validate-before-you-ship)).
 
 ## Layout
 
-```
+```text
 <kit-name>/
   applicability.json        # selector metadata (required)
   CHANGELOG.md              # version history (required)
@@ -72,7 +72,8 @@ Optional per-section field:
   down the layer stack: an overlay that shadows the kit still inherits it and
   cannot drop or replace it. Inert in single-root deployments. Reserve it for
   genuinely non-negotiable sections (security policy, compliance rules). See
-  `MIGRATING-KIT-LAYERS.md` → "Binding sections" for the full semantics.
+  [Binding sections](../developer/migrations/kit-layers.md#binding-sections-the-binding-flag)
+  for the full semantics.
 
 ## `applicability.json` — the selector metadata
 

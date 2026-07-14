@@ -11,9 +11,11 @@ Cloud, Honeycomb, Datadog, …) or scrape a Prometheus endpoint directly. With
 nothing configured the instrumentation is inert (a no-op meter and tracer) — it
 costs effectively nothing and exports nothing.
 
-> **Privacy.** No task text is ever recorded. Metric labels and span attributes
-> carry only counts, latencies, and names drawn from the **catalog vocabulary**
-> (trait values, kit names, section ids) — never client input.
+:::{important}
+**Privacy.** No task text is ever recorded. Metric labels and span attributes
+carry only counts, latencies, and names drawn from the **catalog vocabulary**
+(trait values, kit names, section ids) — never client input.
+:::
 
 ---
 
@@ -269,13 +271,22 @@ A starter dashboard JSON can be committed here as a follow-up.
 
 ## 5. Traces
 
-When a traces endpoint is configured, each `resolve_kits` call is a span tree:
+When a traces endpoint is configured, each `resolve_kits` call is a span tree —
+one parent span over the three pipeline stages, which run in order:
 
-```
-mcp.tool.resolve_kits          attrs: mcp.tool.name, mcp.session.id
-└─ resolve.infer               attrs: engine, trait.count
-└─ resolve.select              attrs: candidates, confidence, coverage
-└─ resolve.assemble            attrs: kits, delivered_tokens, offered_tokens
+```mermaid
+flowchart TB
+  parent["mcp.tool.resolve_kits<br/>attrs: mcp.tool.name · mcp.session.id"]
+  parent --> infer["resolve.infer<br/>attrs: engine · trait.count"]
+  parent --> select["resolve.select<br/>attrs: candidates · confidence · coverage"]
+  parent --> assemble["resolve.assemble<br/>attrs: kits · delivered_tokens · offered_tokens"]
+  infer -.->|then| select
+  select -.->|then| assemble
+
+  classDef parent fill:#E69F00,color:#000,stroke:#000;
+  classDef child fill:#0072B2,color:#fff,stroke:#000;
+  class parent parent
+  class infer,select,assemble child
 ```
 
 The outer `mcp.tool.*` span wraps **every** MCP tool (so `get_kit`,

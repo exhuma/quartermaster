@@ -19,7 +19,8 @@ come from something in the repo anyway (a fragile git remote, or a file). Puttin
 the pin directly in the file needs no identity at all: the file *is* the state,
 colocated with the code and portable across forks and remote moves.
 
-A version pin is **not** the "don't hard-code a kit list in `AGENTS.md`"
+A version pin is **not** the
+["don't hard-code a kit list in `AGENTS.md`"](downstream-agent-guidance.md)
 anti-pattern. A pin does not select kits; it only constrains which *version* a
 selected kit resolves to. It stays fully compatible with per-task `resolve_kits`.
 
@@ -40,11 +41,14 @@ project_id = "qm_<random>"
 module-auth-oidc = "v2"
 ```
 
-| Key          | Meaning                                                              |
-| ------------ | ------------------------------------------------------------------- |
-| `schema`     | File-format version (currently `1`).                                |
-| `project_id` | Optional stable telemetry label; generated once, never regenerated. |
-| `[kits]`     | Per-kit major pin, `<kit-name> = "v<N>"`.                            |
+`schema`
+: File-format version (currently `1`).
+
+`project_id`
+: Optional stable telemetry label; generated once, never regenerated.
+
+`[kits]`
+: Per-kit major pin, `<kit-name> = "v<N>"`.
 
 ## How agents use it
 

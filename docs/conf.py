@@ -9,6 +9,7 @@ into the release Docker image, where it is served at ``/docs`` (see
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -36,16 +37,34 @@ def _resolve_release() -> str:
     """
     Resolve the documented version without hard-coding it.
 
-    The real release version is injected at image-build time via the
-    ``APP_VERSION`` build arg (``git describe --tags``), mirroring the runtime
-    ``app/version.py`` chain. For local builds it falls back to the canonical
-    ``server/pyproject.toml`` version.
+    The documented version tracks the *released* (CalVer) version, resolved in
+    order:
+
+    1. the ``APP_VERSION`` build arg (``git describe --tags``) injected at
+       image-build time (``server/Dockerfile`` docs stage);
+    2. ``git describe --tags`` on the local checkout, so a local build shows the
+       current release tag (e.g. ``2026.7.14-alpha.1``) rather than the
+       decoupled ``server/pyproject.toml`` placeholder;
+    3. the ``server/pyproject.toml`` version, a last resort for a build with no
+       git metadata (e.g. an exported source tarball).
 
     :returns: The version string to document.
     """
     override = os.environ.get("APP_VERSION", "").strip()
     if override:
         return override.lstrip("v")
+    try:
+        described = subprocess.run(
+            ["git", "describe", "--tags"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if described:
+            return described.lstrip("v")
+    except (OSError, subprocess.SubprocessError):
+        pass
     pyproject = _REPO_ROOT / "server" / "pyproject.toml"
     try:
         with pyproject.open("rb") as handle:
@@ -65,6 +84,8 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
     "myst_parser",
+    "sphinx_copybutton",
+    "sphinxcontrib.mermaid",
 ]
 
 # Prefix cross-document section labels with the document name so identically
@@ -88,6 +109,17 @@ suppress_warnings = [
 myst_enable_extensions = ["colon_fence", "deflist"]
 # Generate anchors for h1/h2 so in-page and cross-page links to headings work.
 myst_heading_anchors = 3
+# Let plain ```mermaid fenced blocks render as the sphinxcontrib.mermaid
+# directive, so diagrams stay diffable next to the prose (module-diagrams).
+myst_fence_as_directive = ["mermaid"]
+
+# -- sphinx-copybutton -------------------------------------------------------
+# A copy button on every code block. Strip shell/REPL prompts and any command
+# output so a click copies the runnable command, not the "$" or the result.
+copybutton_prompt_text = r"\$ |# |>>> |\.\.\. "
+copybutton_prompt_is_regexp = True
+# Don't attach the button to Mermaid source or to line-number gutters.
+copybutton_exclude = ".linenos, .gp"
 
 # The ``superpowers/`` tree holds an unrelated design spec that is not part of
 # the published site; keep it out so it does not trip the "not in any toctree"

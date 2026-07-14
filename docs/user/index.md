@@ -4,6 +4,15 @@ Guides for people who use a running Quartermaster instance — one your team
 already hosts, or the published container an operator has deployed. You do not
 need the source code or a local build to follow anything here.
 
+:::{figure} /_static/img/kit-list.png
+:alt: The Quartermaster web UI kit catalog — a table of instruction kits, each row showing its source layer, summary, latest version, and available versions, with a New kit button for editors.
+:width: 100%
+
+The web UI's kit catalog: every instruction kit a running instance serves,
+with its summary and versions. Editors also manage kits here; MCP users never
+need to open it — their agent loads kits automatically.
+:::
+
 There are two kinds of user:
 
 ## MCP users
