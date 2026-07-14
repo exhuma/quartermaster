@@ -47,7 +47,8 @@ def _resolve_layers() -> list[tuple[str, Path, bool]]:
     """
     Resolve kit layers from the environment for WebDAV mounting.
 
-    Returns a list of ``(name, path, readonly)`` tuples, following the same
+    Returns a list of ``(name, path, readonly)`` tuples where ``readonly`` is
+    the layer's **WebDAV-surface** effective flag, following the same
     precedence as :class:`app.config.Settings`:
     ``QM_KIT_LAYERS_FILE`` (TOML) → ``QM_KITS_ROOT`` (single catalog).
 
@@ -57,7 +58,8 @@ def _resolve_layers() -> list[tuple[str, Path, bool]]:
     if layers_file:
         layers = load_layers_from_toml(Path(layers_file))
         return [
-            (layer.name, layer.path, layer.readonly) for layer in layers
+            (layer.name, layer.path, layer.webdav_readonly)
+            for layer in layers
         ]
 
     kits_root = os.environ.get("QM_KITS_ROOT")

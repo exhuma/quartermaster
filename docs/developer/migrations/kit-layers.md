@@ -25,7 +25,10 @@ want to opt into multiple layers.
   `/api/kits/layers/<name>/...` and `/dav/<name>/...`. The merged read views
   (`GET /api/kits`, `GET /api/kits/{name}`) are unchanged.
 - **Read-only layers:** a layer can be marked `readonly = true`; REST/WebDAV
-  writes to it are rejected with **HTTP 403**.
+  writes to it are rejected with **HTTP 403**. The lock can also be applied
+  per surface with `readonly_rest` / `readonly_webdav` (each defaults to
+  `readonly`) — useful when a layer is synced from an external source (e.g.
+  rsync from a pipeline) and one surface should stay writable.
 
 Nothing is removed. `QM_KITS_ROOT` and the existing endpoints are fully
 backward compatible.
@@ -58,10 +61,21 @@ path = "company-kits"     # relative → /data/company-kits
 readonly = true           # central base catalog: no writes from this server
 
 [[layer]]
+name = "synced"
+path = "synced-kits"      # rsync'd from a pipeline: never author via WebDAV,
+readonly_webdav = true    # but REST edits are still allowed (readonly_rest omitted → false)
+
+[[layer]]
 name = "team"
 path = "team-kits"        # relative → /data/team-kits
 # readonly omitted → writable (this is where /dav and REST writes land)
 ```
+
+Per-surface keys (`readonly_rest`, `readonly_webdav`) each fall back to the
+layer's master `readonly` when omitted, so `readonly = true` still locks both
+surfaces. The REST surface covers **both** the web UI and programmatic `/api`
+clients (they are enforced together); the web UI additionally hides its edit
+controls for a REST-read-only kit.
 
 ```bash
 docker run -d --name quartermaster -p 8000:8000 \
@@ -169,7 +183,7 @@ The merged read API is unchanged. New, additive, layer-scoped routes:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/kits/layers` | List configured layers (`name`, `path`, `readonly`). |
+| `GET` | `/api/kits/layers` | List configured layers (`name`, `path`, `readonly`, `rest_readonly`, `webdav_readonly`). |
 | `GET` | `/api/kits/layers/{layer}` | List kits in one layer (un-merged). |
 | `POST` | `/api/kits/layers/{layer}` | Create a kit in that layer (**403** if read-only). |
 | `GET`/`DELETE` | `/api/kits/layers/{layer}/{name}` | Read / delete a kit in that layer. |

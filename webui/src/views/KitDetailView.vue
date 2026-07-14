@@ -8,6 +8,7 @@ import { useMe } from '@/composables/useMe'
 import BaseChart from '@/components/BaseChart.vue'
 import ChartCard from '@/components/ChartCard.vue'
 import FieldHelp from '@/components/FieldHelp.vue'
+import MarkdownView from '@/components/MarkdownView.vue'
 import { applicabilityHelp } from '@/constants/fieldHelp'
 import { versionAdoptionOption } from '@/views/metricsCharts'
 import type {
@@ -143,7 +144,26 @@ async function runCompare(): Promise<void> {
     <v-row>
       <v-col cols="12" md="6">
         <v-card title="Versions" class="mb-4">
+          <template v-if="detail && !detail.editable" #append>
+            <v-chip
+              size="small"
+              variant="tonal"
+              color="warning"
+              prepend-icon="mdi-lock-outline"
+            >
+              Read-only
+            </v-chip>
+          </template>
           <v-card-text>
+            <v-alert
+              v-if="detail && !detail.editable"
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mb-3"
+              text="This kit comes from a read-only layer (e.g. an external
+                sync), so its sections cannot be edited here."
+            />
             <div
               v-for="v in versions"
               :key="v"
@@ -152,13 +172,21 @@ async function runCompare(): Promise<void> {
               <v-chip class="mr-2" variant="tonal">{{ v }}</v-chip>
               <v-spacer />
               <v-btn
-                v-if="isEditor"
+                v-if="isEditor && detail?.editable"
                 size="small"
                 variant="text"
                 color="primary"
                 :to="{ name: 'kit-edit', params: { name, version: v } }"
               >
                 Edit sections
+              </v-btn>
+              <v-btn
+                v-else
+                size="small"
+                variant="text"
+                :to="{ name: 'kit-edit', params: { name, version: v } }"
+              >
+                View sections
               </v-btn>
             </div>
           </v-card-text>
@@ -192,7 +220,7 @@ async function runCompare(): Promise<void> {
             />
             <div v-for="c in comparison?.changes ?? []" :key="c.version">
               <div class="font-weight-medium">{{ c.version }}</div>
-              <pre class="changelog">{{ c.summary }}</pre>
+              <MarkdownView :source="c.summary" />
             </div>
           </v-card-text>
         </v-card>
@@ -372,17 +400,9 @@ async function runCompare(): Promise<void> {
 
     <v-card title="Changelog" class="mt-4">
       <v-card-text>
-        <pre class="changelog">{{ changelog || 'No changelog.' }}</pre>
+        <MarkdownView v-if="changelog" :source="changelog" />
+        <span v-else class="text-medium-emphasis">No changelog.</span>
       </v-card-text>
     </v-card>
   </v-container>
 </template>
-
-<style scoped>
-.changelog {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.85rem;
-}
-</style>

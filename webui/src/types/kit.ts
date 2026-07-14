@@ -7,6 +7,9 @@ export interface KitInfo {
   versions: string[]
   latest_version: string
   source_layer: string | null
+  // False when the kit's owning layer is read-only for the REST surface
+  // (e.g. an externally-synced layer): the web UI hides its edit affordances.
+  editable: boolean
   // Set when the kit's index is malformed: the kit is listed but flagged so it
   // can be surfaced and fixed (see app/kits.py list_all_kits).
   broken?: boolean
@@ -17,6 +20,9 @@ export interface KitDetail {
   name: string
   versions: string[]
   latest_version: string
+  source_layer: string | null
+  // See KitInfo.editable — mirrors the owning layer's REST read-only state.
+  editable: boolean
   applicability: Record<string, unknown>
 }
 

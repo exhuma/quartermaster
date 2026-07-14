@@ -78,7 +78,7 @@ def _kits_write_root() -> Path:
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
     for layer in reversed(layers):
-        if not layer.readonly:
+        if not layer.rest_readonly:
             return layer.path
     raise RuntimeError(
         "No writable kit layer configured. "
@@ -108,13 +108,13 @@ def _layer_write_path(layer_id: str) -> Path:
 
     :param layer_id: Layer name as configured in QM_KIT_LAYERS_FILE.
     :raises KitLayerNotFoundError: If no such layer is configured.
-    :raises KitLayerReadonlyError: If the layer has readonly=true.
+    :raises KitLayerReadonlyError: If the layer is read-only for REST.
     """
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
     for layer in layers:
         if layer.name == layer_id:
-            if layer.readonly:
+            if layer.rest_readonly:
                 raise KitLayerReadonlyError(layer_id)
             return layer.path
     raise KitLayerNotFoundError(layer_id)
@@ -211,12 +211,32 @@ def _validate_instructions(instr_dir: Path, name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _layer_rest_editable(source_layer: str | None) -> bool:
+    """
+    Return whether a kit owned by *source_layer* is editable over REST.
+
+    A missing or unrecognised layer (legacy single-root usage) is treated as
+    editable. This is the signal the web UI uses to hide its edit affordances
+    for read-only (e.g. externally-synced) layers.
+
+    :param source_layer: Owning layer name, or ``None``.
+    :returns: ``True`` when REST writes to the layer are allowed.
+    """
+    if not source_layer:
+        return True
+    settings = kits_mod.get_settings()
+    for layer in kits_mod._get_effective_layers(settings):
+        if layer.name == source_layer:
+            return not layer.rest_readonly
+    return True
+
+
 def list_kits() -> list[dict[str, Any]]:
     """
     List all kits with compact metadata.
 
     :returns: List of ``{name, description, versions, latest_version,
-        source_layer, broken, error}``.
+        source_layer, editable, broken, error}``.
     """
     return [
         {
@@ -225,6 +245,7 @@ def list_kits() -> list[dict[str, Any]]:
             "versions": kit.versions,
             "latest_version": kit.latest_version,
             "source_layer": kit.source_layer,
+            "editable": _layer_rest_editable(kit.source_layer),
             "broken": kit.broken,
             "error": kit.error,
         }
@@ -252,7 +273,8 @@ def list_layers() -> list[dict[str, Any]]:
     """
     Return metadata for all configured kit layers.
 
-    :returns: List of ``{name, path, readonly}`` dicts, ordered base → overlay.
+    :returns: List of ``{name, path, readonly, rest_readonly,
+        webdav_readonly}`` dicts, ordered base → overlay.
     """
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
@@ -261,6 +283,8 @@ def list_layers() -> list[dict[str, Any]]:
             "name": layer.name,
             "path": str(layer.path),
             "readonly": layer.readonly,
+            "rest_readonly": layer.rest_readonly,
+            "webdav_readonly": layer.webdav_readonly,
         }
         for layer in layers
     ]
@@ -272,7 +296,9 @@ def get_kit_detail(name: str, root: Path | None = None) -> dict[str, Any]:
 
     :param name: Kit name.
     :param root: When given, read from this root only (layer-specific).
-    :returns: ``{name, versions, latest_version, applicability}``.
+    :returns: ``{name, versions, latest_version, source_layer, editable,
+        applicability}`` for the merged view (layer-specific view omits
+        ``source_layer``/``editable``).
     :raises KitNotFoundError: If the kit does not exist.
     """
     if root is not None:
@@ -295,6 +321,7 @@ def get_kit_detail(name: str, root: Path | None = None) -> dict[str, Any]:
         "versions": kit_info.versions,
         "latest_version": kit_info.latest_version,
         "source_layer": kit_info.source_layer,
+        "editable": _layer_rest_editable(kit_info.source_layer),
         "applicability": get_applicability(name),
     }
 
@@ -584,7 +611,7 @@ def _rewrite_instructions(
                 index_path.relative_to(layer.path)
             except ValueError:
                 continue
-            if layer.readonly:
+            if layer.rest_readonly:
                 raise KitLayerReadonlyError(layer.name)
             break
     instr_dir = index_path.parent

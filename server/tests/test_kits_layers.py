@@ -143,6 +143,47 @@ def test_load_layers_from_toml_basic(tmp_path: Path) -> None:
     assert layers[0].path == Path("/abs/company")
 
 
+def test_load_layers_parses_per_surface_flags(tmp_path: Path) -> None:
+    """readonly_rest / readonly_webdav parse as optional overrides."""
+    toml_file = tmp_path / "layers.toml"
+    toml_file.write_text(
+        "[[layer]]\n"
+        'name = "synced"\n'
+        'path = "/abs/synced"\n'
+        "readonly_webdav = true\n\n"
+        "[[layer]]\n"
+        'name = "locked"\n'
+        'path = "/abs/locked"\n'
+        "readonly_rest = true\n\n"
+        "[[layer]]\n"
+        'name = "team"\n'
+        'path = "/abs/team"\n',
+        encoding="utf-8",
+    )
+    synced, locked, team = load_layers_from_toml(toml_file)
+    # An override applies only to its surface; the other falls back to the
+    # master `readonly` (default False here).
+    assert synced.webdav_readonly is True
+    assert synced.rest_readonly is False
+    assert locked.rest_readonly is True
+    assert locked.webdav_readonly is False
+    assert team.rest_readonly is False
+    assert team.webdav_readonly is False
+
+
+def test_layer_surface_readonly_falls_back_to_master() -> None:
+    """Per-surface effective flags default to the master `readonly`."""
+    master = KitLayerConfig(name="m", path=Path("/x"), readonly=True)
+    assert master.rest_readonly is True
+    assert master.webdav_readonly is True
+    # A per-surface override wins over the master for that surface only.
+    split = KitLayerConfig(
+        name="s", path=Path("/x"), readonly=True, readonly_webdav=False
+    )
+    assert split.webdav_readonly is False
+    assert split.rest_readonly is True
+
+
 def test_load_layers_relative_paths_resolved_against_file_dir(
     tmp_path: Path,
 ) -> None:
@@ -582,6 +623,91 @@ def test_layer_write_path_blocks_readonly(
         _layer_write_path("company")
 
 
+def _settings_with_layers(
+    layers: list[KitLayerConfig], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point ``app.kits.get_settings`` at a mock exposing *layers*."""
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S",
+            (),
+            {"kits_root": None, "effective_layers": layers},
+        )(),
+    )
+
+
+def test_layer_write_path_blocks_rest_readonly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rest-readonly layer is refused for REST writes."""
+    layers = [
+        KitLayerConfig(name="locked", path=tmp_path, readonly_rest=True)
+    ]
+    _settings_with_layers(layers, monkeypatch)
+    with pytest.raises(KitLayerReadonlyError):
+        _layer_write_path("locked")
+
+
+def test_layer_write_path_allows_webdav_only_readonly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A webdav-only readonly layer stays writable over REST."""
+    layers = [
+        KitLayerConfig(name="synced", path=tmp_path, readonly_webdav=True)
+    ]
+    _settings_with_layers(layers, monkeypatch)
+    assert _layer_write_path("synced") == tmp_path
+
+
+def test_list_kits_editable_reflects_rest_readonly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """svc.list_kits marks kits from a rest-readonly layer editable=False."""
+    writable = tmp_path / "writable"
+    locked = tmp_path / "locked"
+    writable.mkdir()
+    locked.mkdir()
+    _make_kit(writable, "free-kit")
+    _make_kit(locked, "locked-kit")
+    layers = [
+        KitLayerConfig(name="writable", path=writable, readonly=False),
+        KitLayerConfig(name="locked", path=locked, readonly_rest=True),
+    ]
+    _settings_with_layers(layers, monkeypatch)
+    by_name = {k["name"]: k for k in svc.list_kits()}
+    assert by_name["free-kit"]["editable"] is True
+    assert by_name["locked-kit"]["editable"] is False
+
+
+def test_dav_resolve_layers_uses_webdav_surface_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WebDAV provider readonly derives from the webdav-surface flag."""
+    from app.dav.webdav_app import _resolve_layers
+
+    (tmp_path / "synced").mkdir()
+    (tmp_path / "team").mkdir()
+    toml_file = tmp_path / "layers.toml"
+    toml_file.write_text(
+        "[[layer]]\n"
+        'name = "synced"\n'
+        'path = "synced"\n'
+        "readonly_webdav = true\n"
+        "readonly_rest = false\n\n"
+        "[[layer]]\n"
+        'name = "team"\n'
+        'path = "team"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("QM_KIT_LAYERS_FILE", str(toml_file))
+    layers = _resolve_layers()
+    # Tuple shape is (name, path, readonly) where readonly is webdav-effective.
+    by_name = {name: readonly for name, _path, readonly in layers}
+    assert by_name["synced"] is True
+    assert by_name["team"] is False
+
+
 # ---------------------------------------------------------------------------
 # Service write operations targeting specific layers
 # ---------------------------------------------------------------------------
@@ -896,6 +1022,62 @@ def test_rest_create_kit_readonly_layer_403(
         headers={"Accept": _VENDOR, "Content-Type": "application/json"},
     )
     assert resp.status_code == 403
+
+
+def test_rest_per_surface_readonly_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REST honours rest-readonly and ignores webdav-only readonly.
+
+    A ``readonly_rest`` layer blocks REST writes (403) and reports
+    ``editable=False`` to the web UI; a ``readonly_webdav``-only layer stays
+    writable over REST.
+    """
+    rest_locked = tmp_path / "rest_locked"
+    dav_locked = tmp_path / "dav_locked"
+    rest_locked.mkdir()
+    dav_locked.mkdir()
+    _make_kit(rest_locked, "rest-locked-kit")
+    _make_kit(dav_locked, "dav-locked-kit")
+
+    layers = [
+        KitLayerConfig(
+            name="rest_locked", path=rest_locked, readonly_rest=True
+        ),
+        KitLayerConfig(
+            name="dav_locked", path=dav_locked, readonly_webdav=True
+        ),
+    ]
+    client = _make_client(monkeypatch, tmp_path, layers)
+
+    # The merged listing exposes editability per owning layer.
+    listing = {k["name"]: k for k in client.get("/api/kits").json()}
+    assert listing["rest-locked-kit"]["editable"] is False
+    assert listing["dav-locked-kit"]["editable"] is True
+
+    section = {
+        "title": "Core",
+        "gloss": "Core",
+        "always_load": True,
+        "body": "# Core\n\nEdited body.",
+    }
+    headers = {"Accept": _VENDOR, "Content-Type": "application/json"}
+
+    blocked = client.put(
+        "/api/kits/layers/rest_locked/rest-locked-kit"
+        "/versions/v1/sections/invariant",
+        json=section,
+        headers=headers,
+    )
+    assert blocked.status_code == 403
+
+    allowed = client.put(
+        "/api/kits/layers/dav_locked/dav-locked-kit"
+        "/versions/v1/sections/invariant",
+        json=section,
+        headers=headers,
+    )
+    assert allowed.status_code == 200
 
 
 def test_rest_delete_kit_from_layer(

@@ -35,13 +35,40 @@ class KitLayerConfig(BaseModel):
         Used as the layer path segment in ``/api/kits/layers/{name}`` and
         ``/dav/{name}/``.
     :param path: Local filesystem path to the kit catalog root for this layer.
-    :param readonly: When true, REST and WebDAV writes to this layer are
-        rejected with HTTP 403.
+    :param readonly: Master switch — when true, both REST and WebDAV writes to
+        this layer are rejected with HTTP 403. Acts as the default for the
+        per-surface overrides below.
+    :param readonly_rest: Override for the REST surface (the web UI and the
+        programmatic ``/api`` clients, which are hard-enforced together). When
+        ``None`` it falls back to :attr:`readonly`.
+    :param readonly_webdav: Override for the WebDAV authoring surface. When
+        ``None`` it falls back to :attr:`readonly`. Lets an externally-synced
+        (e.g. rsync'd) layer lock one surface while leaving the other writable.
     """
 
     name: str
     path: Path
     readonly: bool = False
+    readonly_rest: bool | None = None
+    readonly_webdav: bool | None = None
+
+    @property
+    def rest_readonly(self) -> bool:
+        """Effective read-only state for the REST surface."""
+        return (
+            self.readonly
+            if self.readonly_rest is None
+            else self.readonly_rest
+        )
+
+    @property
+    def webdav_readonly(self) -> bool:
+        """Effective read-only state for the WebDAV surface."""
+        return (
+            self.readonly
+            if self.readonly_webdav is None
+            else self.readonly_webdav
+        )
 
 
 def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
@@ -54,7 +81,12 @@ def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
         [[layer]]
         name = "company"
         path = "company-kits"   # relative → resolved against this file's dir
-        readonly = true
+        readonly = true         # locks both REST and WebDAV
+
+        [[layer]]
+        name = "synced"
+        path = "/data/synced-kits"
+        readonly_webdav = true  # rsync'd layer: block WebDAV, allow REST
 
         [[layer]]
         name = "team"
@@ -103,6 +135,16 @@ def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
         name = str(entry.get("name", "")).strip()
         path_str = str(entry.get("path", "")).strip()
         readonly = bool(entry.get("readonly", False))
+        readonly_rest = (
+            bool(entry["readonly_rest"])
+            if "readonly_rest" in entry
+            else None
+        )
+        readonly_webdav = (
+            bool(entry["readonly_webdav"])
+            if "readonly_webdav" in entry
+            else None
+        )
         if not name or not path_str:
             raise ValueError(
                 f"Kit layers file {file_path}: [[layer]] #{pos} must set "
@@ -118,7 +160,13 @@ def load_layers_from_toml(file_path: Path) -> list[KitLayerConfig]:
         if not layer_path.is_absolute():
             layer_path = (base_dir / layer_path).resolve()
         layers.append(
-            KitLayerConfig(name=name, path=layer_path, readonly=readonly)
+            KitLayerConfig(
+                name=name,
+                path=layer_path,
+                readonly=readonly,
+                readonly_rest=readonly_rest,
+                readonly_webdav=readonly_webdav,
+            )
         )
     return layers
 
