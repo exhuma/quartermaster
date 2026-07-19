@@ -88,10 +88,15 @@ def test_resolve_kits_uses_client_sampling() -> None:
         client = Client(mcp, sampling_handler=_sampling_handler)
         async with client:
             return await client.call_tool(
-                "resolve_kits", {"task": "build a backend service"}
+                "resolve_kits",
+                {
+                    "task": "build a backend service",
+                    "include_diagnostics": True,
+                },
             )
 
     data = _run(_go()).data
+    # engine is diagnostics-only in the lean default; request it explicitly.
     assert data["engine"] == "sampling"
     assert "fastapi" in data["inferred_traits"]["frameworks"]
     assert {k["name"] for k in data["kits"]} == {"kit-alpha"}
@@ -102,11 +107,15 @@ def test_resolve_kits_degrades_without_sampling() -> None:
         client = Client(mcp)  # no sampling handler advertised
         async with client:
             return await client.call_tool(
-                "resolve_kits", {"task": "add a fastapi endpoint"}
+                "resolve_kits",
+                {
+                    "task": "add a fastapi endpoint",
+                    "include_diagnostics": True,
+                },
             )
 
     data = _run(_go()).data
-    # Falls back to the deterministic lexical floor.
+    # Falls back to the deterministic lexical floor (engine is diagnostics-only).
     assert data["engine"] == "lexical"
     assert "fastapi" in data["inferred_traits"]["frameworks"]
 

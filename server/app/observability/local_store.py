@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS resolve_events (
     broadening INTEGER NOT NULL DEFAULT 0,
     delivered_tokens INTEGER NOT NULL DEFAULT 0,
     offered_tokens INTEGER NOT NULL DEFAULT 0,
+    suppressed_tokens INTEGER NOT NULL DEFAULT 0,
     subject TEXT,
     traits_json TEXT
 );
@@ -187,6 +188,7 @@ class LocalMetricsStore:
         deliveries: list[tuple[str, str, int]],
         delivered_tokens: int,
         offered_tokens: int,
+        suppressed_tokens: int = 0,
         subject: str | None = None,
         project_id: str | None = None,
         traits_json: str | None = None,
@@ -196,6 +198,8 @@ class LocalMetricsStore:
         :param deliveries: ``(kit, disposition, tokens)`` triples delivered by
             this resolve. Written with the new resolve's id so co-occurrence
             (which kits travelled together) is recoverable.
+        :param suppressed_tokens: Always-load tokens omitted by session dedup
+            (already delivered earlier this session); a context-saving figure.
         :param subject: The caller's stable IdP subject, when authenticated.
             ``None`` for unattributed/anonymous resolves. Feeds per-user
             memory derivation (see ``app.storage.user_memory``).
@@ -213,9 +217,9 @@ class LocalMetricsStore:
                 cur = conn.execute(
                     "INSERT INTO resolve_events "
                     "(ts, engine, confidence, coverage, broadening, "
-                    " delivered_tokens, offered_tokens, subject, project_id, "
-                    " traits_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " delivered_tokens, offered_tokens, suppressed_tokens, "
+                    " subject, project_id, traits_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         engine,
@@ -224,6 +228,7 @@ class LocalMetricsStore:
                         1 if broadening else 0,
                         int(delivered_tokens),
                         int(offered_tokens),
+                        int(suppressed_tokens),
                         subject,
                         project_id,
                         traits_json,
@@ -445,6 +450,11 @@ class LocalMetricsStore:
             conn.execute(
                 "ALTER TABLE resolve_events ADD COLUMN project_id TEXT"
             )
+        if "suppressed_tokens" not in cols:
+            conn.execute(
+                "ALTER TABLE resolve_events ADD COLUMN "
+                "suppressed_tokens INTEGER NOT NULL DEFAULT 0"
+            )
         conn.commit()
 
     def resolve_history_for_subject(
@@ -519,11 +529,12 @@ class LocalMetricsStore:
     def tokens_timeseries(
         self, cutoff: float, granularity: str = "1d"
     ) -> list[dict[str, Any]]:
-        """Per-bucket delivered vs offered tokens sent to clients.
+        """Per-bucket delivered vs offered vs suppressed tokens.
 
-        *granularity* selects the bucket size (``1h``/``1d``); the ``day``
-        key is an opaque, sorted bucket label (a date, or
-        ``YYYY-MM-DD HH:00`` hourly).
+        ``suppressed`` is the always-load content session dedup kept out of the
+        caller's context (a saving, not a delivery). *granularity* selects the
+        bucket size (``1h``/``1d``); the ``day`` key is an opaque, sorted bucket
+        label (a date, or ``YYYY-MM-DD HH:00`` hourly).
         """
         fmt = _GRANULARITY_FORMATS.get(granularity, _GRANULARITY_FORMATS["1d"])
         rows = self._query(
@@ -536,14 +547,21 @@ class LocalMetricsStore:
         by_day: dict[str, dict[str, int]] = {}
         for r in rows:
             bucket = by_day.setdefault(
-                r["day"], {"delivered": 0, "offered": 0}
+                r["day"], {"delivered": 0, "offered": 0, "suppressed": 0}
             )
             if r["disposition"] == "offered":
                 bucket["offered"] += r["tokens"]
+            elif r["disposition"] == "suppressed":
+                bucket["suppressed"] += r["tokens"]
             else:
                 bucket["delivered"] += r["tokens"]
         return [
-            {"day": day, "delivered": v["delivered"], "offered": v["offered"]}
+            {
+                "day": day,
+                "delivered": v["delivered"],
+                "offered": v["offered"],
+                "suppressed": v["suppressed"],
+            }
             for day, v in sorted(by_day.items())
         ]
 

@@ -83,11 +83,15 @@ describe('tokensOption', () => {
   // collapsed missing hours, so these read out of order and looked like a 24h
   // day. A real time axis must keep them ordered and dated.
   const points: TokenPoint[] = [
-    { day: '2026-07-01 23:00', delivered: 10, offered: 1 },
-    { day: '2026-07-02 00:00', delivered: 20, offered: 2 },
-    { day: '2026-07-02 01:00', delivered: 30, offered: 3 },
+    { day: '2026-07-01 23:00', delivered: 10, offered: 1, suppressed: 5 },
+    { day: '2026-07-02 00:00', delivered: 20, offered: 2, suppressed: 6 },
+    { day: '2026-07-02 01:00', delivered: 30, offered: 3, suppressed: 7 },
   ]
-  const cols = { primary: '#111', secondary: '#222' }
+  const cols = {
+    primary: '#111',
+    secondary: '#222',
+    success: '#333',
+  }
   const bounds = { min: Date.UTC(2026, 6, 1, 23), max: Date.UTC(2026, 6, 2, 1) }
 
   it('builds a time axis spanning the given bounds', () => {
@@ -117,6 +121,20 @@ describe('tokensOption', () => {
     expect(opt.xAxis.type).toBe('time')
     expect(opt.xAxis.min).toBeUndefined()
     expect(opt.series[0].data).toEqual([])
+  })
+
+  it('includes a suppressed (dedup savings) series and legend entry', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opt = tokensOption(points, cols, '1h', bounds) as any
+    expect(opt.legend.data).toContain('Suppressed (dedup savings)')
+    const suppressed = opt.series.find(
+      (s: { name: string }) => s.name === 'Suppressed (dedup savings)'
+    )
+    expect(suppressed.data).toEqual([
+      [Date.UTC(2026, 6, 1, 23), 5],
+      [Date.UTC(2026, 6, 2, 0), 6],
+      [Date.UTC(2026, 6, 2, 1), 7],
+    ])
   })
 })
 

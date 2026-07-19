@@ -87,6 +87,13 @@ const totalDelivered = computed(() =>
   )
 )
 
+const totalSuppressed = computed(() =>
+  (overview.value?.tokens_timeseries ?? []).reduce(
+    (sum, p) => sum + p.suppressed,
+    0
+  )
+)
+
 // Chart options — safe to build from empty data (the builders handle it); the
 // ChartCard `empty` flags below decide whether to render or show the hint.
 const kitUsage = computed(() =>
@@ -234,8 +241,8 @@ const health = computed(() => overview.value?.resolve_health)
       <v-col cols="12" md="6">
         <ChartCard
           title="Tokens sent to clients"
-          :what-it-shows="`Tokens delivered over time (${totalDelivered.toLocaleString()} in this window). 'Delivered' is content actually sent; 'offered' is left for on-demand fetch and is not sent yet.`"
-          how-to-read="Lower delivered tokens for the same amount of work is better — it means less of the client's context is spent. Watch the delivered line, not offered."
+          :what-it-shows="`Tokens delivered over time (${totalDelivered.toLocaleString()} in this window). 'Delivered' is content actually sent; 'offered' is left for on-demand fetch and is not sent yet; 'suppressed' is always-load content session dedup kept out of the caller's context (${totalSuppressed.toLocaleString()} saved).`"
+          how-to-read="Lower delivered tokens for the same amount of work is better — it means less of the client's context is spent. A rising suppressed line means session dedup is saving context on repeat resolves."
           :empty="(overview?.tokens_timeseries.length ?? 0) === 0"
         >
           <BaseChart :option="tokens" :height="360" />

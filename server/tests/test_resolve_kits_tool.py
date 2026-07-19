@@ -98,8 +98,9 @@ def test_resolve_kits_threads_sampled_traits_as_pre_inferred(
     monkeypatch.setattr("app.main._resolve_kits", _fake_resolve)
     monkeypatch.setattr("app.main.build_ranker", lambda: "ranker-sentinel")
 
-    result = _run(tool.fn(task="add auth", ctx=_FakeCtx(sampling=True)))
-    assert result["engine"] == "sampling"
+    _run(tool.fn(task="add auth", ctx=_FakeCtx(sampling=True)))
+    # The sampled traits reach the resolver as pre_inferred (engine itself is
+    # diagnostics-only in the lean default payload).
     assert captured["pre_inferred"] is sampled
     assert captured["section_ranker"] == "ranker-sentinel"
 
@@ -426,6 +427,80 @@ def test_include_diagnostics_attaches_diagnostics_block(monkeypatch) -> None:
         }
     ]
     assert "Quartermaster Insights" in diag["report_instruction"]
+
+
+# ---------------------------------------------------------------------------
+# Payload slimming
+# ---------------------------------------------------------------------------
+
+
+def test_default_payload_is_slim(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    monkeypatch.setattr("app.main._resolve_kits", lambda **k: _full_result())
+
+    result = _run(tool.fn(task="add JWT auth"))
+
+    # Diagnostics-only fields are stripped from the default response.
+    assert "engine" not in result
+    assert "coverage" not in result
+    assert "provenance" not in result["inferred_traits"]
+    assert "_diagnostics" not in result
+    kit = result["kits"][0]
+    assert "score" not in kit
+    assert "confidence" not in kit
+    assert "reasons" not in kit
+    # Decision-driving fields are kept.
+    assert kit["name"] == "module-auth-oidc"
+    assert kit["summary"] == "OIDC auth"
+    assert "always_load_markdown" in kit
+    assert "fetch_on_demand" in kit
+    assert result["inferred_traits"]["languages"] == ["python"]
+    assert result["confidence"] == 0.82
+    assert result["broadening_recommended"] is False
+
+
+def test_include_diagnostics_keeps_full_detail(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    monkeypatch.setattr("app.main._resolve_kits", lambda **k: _full_result())
+
+    result = _run(tool.fn(task="add JWT auth", include_diagnostics=True))
+
+    # Nothing is stripped when diagnostics are requested.
+    assert result["engine"] == "sampling"
+    assert result["coverage"] == 0.75
+    assert result["inferred_traits"]["provenance"]
+    assert result["kits"][0]["score"] == 92
+    assert "_diagnostics" in result
+
+
+def test_ctx_without_session_id_inlines(monkeypatch) -> None:
+    # A context lacking a session_id attribute must not break threading and
+    # resolves with session_id=None (no dedup).
+    tool = _get_tool("resolve_kits")
+    captured: dict = {}
+
+    def _fake_resolve(**kwargs):
+        captured.update(kwargs)
+        return _full_result()
+
+    monkeypatch.setattr("app.main._resolve_kits", _fake_resolve)
+    _run(tool.fn(task="add JWT auth", ctx=_FakeCtx()))
+    assert captured["session_id"] is None
+
+
+def test_ctx_session_id_is_threaded(monkeypatch) -> None:
+    tool = _get_tool("resolve_kits")
+    captured: dict = {}
+
+    def _fake_resolve(**kwargs):
+        captured.update(kwargs)
+        return _full_result()
+
+    monkeypatch.setattr("app.main._resolve_kits", _fake_resolve)
+    ctx = _FakeCtx()
+    ctx.session_id = "mcp-session-abc"
+    _run(tool.fn(task="add JWT auth", ctx=ctx))
+    assert captured["session_id"] == "mcp-session-abc"
 
 
 def test_diagnostics_absent_by_default(monkeypatch) -> None:

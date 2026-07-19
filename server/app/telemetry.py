@@ -110,6 +110,7 @@ _resolve_coverage: Any = None
 _resolve_broadening: Any = None
 _resolve_delivered_tokens: Any = None
 _resolve_offered_tokens: Any = None
+_resolve_suppressed_tokens: Any = None
 _kit_deliveries: Any = None
 _kit_delivered_tokens: Any = None
 _section_deliveries: Any = None
@@ -488,6 +489,7 @@ def _create_instruments(meter: Any) -> None:
     global _resolve_calls, _resolve_engine, _resolve_confidence
     global _resolve_coverage, _resolve_broadening
     global _resolve_delivered_tokens, _resolve_offered_tokens
+    global _resolve_suppressed_tokens
     global _kit_deliveries, _kit_delivered_tokens, _section_deliveries
     global _trait_matched, _gap_requested, _gap_detected
     if _instr_meter is meter:
@@ -532,6 +534,11 @@ def _create_instruments(meter: Any) -> None:
         "qm.resolve.offered_tokens",
         unit="token",
         description="On-demand (offered) tokens per resolve.",
+    )
+    _resolve_suppressed_tokens = meter.create_histogram(
+        "qm.resolve.suppressed_tokens",
+        unit="token",
+        description="Always-load tokens suppressed by session dedup.",
     )
     _kit_deliveries = meter.create_counter(
         "qm.kit.deliveries",
@@ -714,7 +721,8 @@ def record_kit_delivery(
     Record that *kit* content was delivered to a client.
 
     :param kit: Kit name.
-    :param disposition: ``inlined`` | ``offered`` | ``full`` | ``sections``.
+    :param disposition: ``inlined`` | ``offered`` | ``suppressed`` | ``full``
+        | ``sections``.
     :param tokens: Token size of the delivered (or offered) content.
     :param section_ids: Section ids involved (only emitted when section-level
         metrics are enabled).
@@ -752,6 +760,7 @@ def record_resolve(
     broadening_recommended: bool,
     delivered_tokens: int,
     offered_tokens: int,
+    suppressed_tokens: int = 0,
     traits: dict[str, list[str]],
 ) -> None:
     """Record per-call ``resolve_kits`` metrics (no task text)."""
@@ -766,6 +775,7 @@ def record_resolve(
             _resolve_broadening.add(1)
         _resolve_delivered_tokens.record(delivered_tokens)
         _resolve_offered_tokens.record(offered_tokens)
+        _resolve_suppressed_tokens.record(suppressed_tokens)
         for category, values in traits.items():
             for value in values:
                 _trait_matched.add(1, {"category": category, "value": value})

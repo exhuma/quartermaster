@@ -575,6 +575,7 @@ async def _resolve_once(
     max_sections_per_kit: int,
     pins: dict[str, str] | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """
     Run one resolution: sampling inference (if available) + sync assembly.
@@ -601,6 +602,7 @@ async def _resolve_once(
         section_ranker=section_ranker,
         pins=pins,
         project_id=project_id,
+        session_id=session_id,
     )
 
 
@@ -722,6 +724,32 @@ def _build_diagnostics(result: dict, *, clarification_used: bool) -> dict:
     }
 
 
+# Fields returned only under ``include_diagnostics`` (they are redundant with
+# the ``_diagnostics`` block); stripped from the lean default response.
+_DIAGNOSTIC_TOP_KEYS = ("engine", "coverage")
+_DIAGNOSTIC_KIT_KEYS = ("score", "confidence", "reasons")
+
+
+def _slim_payload(result: dict) -> dict:
+    """Drop diagnostics-only fields from the default resolve response.
+
+    Keeps the payload focused on what changes a coding agent's decisions
+    (traits, summaries, inlined content, fetch/already-delivered pointers).
+    Everything removed here is available via ``include_diagnostics=True``.
+    Mutates and returns *result*.
+    """
+    for key in _DIAGNOSTIC_TOP_KEYS:
+        result.pop(key, None)
+    traits = result.get("inferred_traits")
+    if isinstance(traits, dict):
+        traits.pop("provenance", None)
+    for kit in result.get("kits", []):
+        if isinstance(kit, dict):
+            for key in _DIAGNOSTIC_KIT_KEYS:
+                kit.pop(key, None)
+    return result
+
+
 @mcp.tool
 async def resolve_kits(
     task: str,
@@ -773,10 +801,17 @@ async def resolve_kits(
         ``.quartermaster.toml`` (the server never writes it).
     :param project_id: Optional stable repo label from ``.quartermaster.toml``,
         recorded with adoption telemetry only.
-    :returns: ``{engine, inferred_traits, confidence, coverage,
-        broadening_recommended, kits, warnings}``; each kit carries
-        ``sections``, ``always_load_markdown`` and ``fetch_on_demand``. When
-        *include_diagnostics* is set, also ``_diagnostics``.
+    :returns: A lean ``{inferred_traits, confidence, broadening_recommended,
+        kits, warnings, gap}``; each kit carries ``name``, ``version``,
+        ``summary``, ``always_load_markdown`` and ``fetch_on_demand``
+        (``[{id, title, gloss}]``). ``always_load`` sections already inlined
+        earlier in the same MCP session are omitted from
+        ``always_load_markdown`` and listed under the kit's
+        ``already_delivered`` (each with a ``get_kit`` re-fetch note) — this is
+        skipped when dedup is disabled or no session id is available. When
+        *include_diagnostics* is set, the response also carries ``_diagnostics``
+        and restores the diagnostic fields (``engine``, ``coverage``, trait
+        ``provenance``, per-kit ``score``/``confidence``/``reasons``).
     :raises ValueError: If *task* is empty and the client cannot be asked to
         clarify (no elicitation support).
     """
@@ -787,6 +822,8 @@ async def resolve_kits(
     can_elicit = (
         ctx is not None and elicitation_on and client_supports_elicitation(ctx)
     )
+    # The MCP session id scopes per-conversation dedup; absent → inline all.
+    session_id = getattr(ctx, "session_id", None) if ctx is not None else None
 
     task = (task or "").strip()
     # Disambiguate an empty task up front rather than failing outright.
@@ -814,6 +851,7 @@ async def resolve_kits(
         max_sections_per_kit=max_sections_per_kit,
         pins=pins,
         project_id=project_id,
+        session_id=session_id,
     )
 
     # One clarification round on a weak match: ask for detail, then re-resolve
@@ -832,12 +870,18 @@ async def resolve_kits(
                 max_sections_per_kit=max_sections_per_kit,
                 pins=pins,
                 project_id=project_id,
+                session_id=session_id,
             )
 
+    # Full detail on request; otherwise strip the diagnostics-only fields so
+    # the default payload stays lean (all values remain available under
+    # include_diagnostics). _build_diagnostics must run on the full result.
     if include_diagnostics:
         result["_diagnostics"] = _build_diagnostics(
             result, clarification_used=clarification_used
         )
+    else:
+        result = _slim_payload(result)
 
     return result
 

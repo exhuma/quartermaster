@@ -28,6 +28,7 @@ export interface TokenPoint {
   day: string
   delivered: number
   offered: number
+  suppressed: number
 }
 
 export interface ResolveHealth {
