@@ -390,6 +390,15 @@ class Settings(BaseSettings):
     :param resolve_elicit_min_confidence: Selection-confidence threshold below
         which ``resolve_kits`` will elicit clarification (when elicitation is
         supported and enabled). Higher values elicit more eagerly.
+    :param resolve_dedup_enabled: When true (default), ``resolve_kits`` avoids
+        re-inlining ``always_load`` sections already delivered earlier in the
+        same MCP session (see ``app/session_ledger.py``), listing them under
+        each kit's ``already_delivered`` instead. Reduces context-window
+        occupancy on repeat resolves. Set false to always inline in full.
+    :param resolve_dedup_ttl_seconds: How long a session's delivery record is
+        retained before expiry; approximates a conversation lifetime.
+    :param resolve_dedup_max_sessions: Upper bound on tracked sessions in the
+        in-memory ledger; least-recently-used sessions are evicted past it.
     :param gap_detection_enabled: When true (default), ``resolve_kits`` runs a
         catalog-recall check (see ``app/gap.py``) whenever trait inference
         finds nothing for a task, to confirm the catalog genuinely has no
@@ -530,6 +539,13 @@ class Settings(BaseSettings):
     sampling_enabled: bool = True
     elicitation_enabled: bool = True
     resolve_elicit_min_confidence: float = 0.25
+    # Session-scoped resolve dedup: on repeat ``resolve_kits`` within one MCP
+    # session (~ one conversation / context window), suppress re-inlining
+    # ``always_load`` sections already delivered this session. In-memory,
+    # disposable, self-healing (see app/session_ledger.py).
+    resolve_dedup_enabled: bool = True
+    resolve_dedup_ttl_seconds: int = 3600
+    resolve_dedup_max_sessions: int = 2048
     # Catalog-recall gap detection: when trait inference finds nothing for a
     # task, confirm it against the whole catalog (not just the inferred
     # vocabulary) before treating it as a gap worth reporting. See app/gap.py.

@@ -36,13 +36,15 @@ Quartermaster web UI for copy-pasteable Claude Code hooks and equivalents for
 other agents.
 
 **Load lean and handle session state.** Pull any extra sections listed under
-`fetch_on_demand` with `get_kit(name, sections=[…])` when you reach that aspect.
-To preserve token space, deliver each required section's contents only once per
-session/conversation. Offering optional sections can be done multiple times
-(sparingly) as it does not consume much context. Note that because this server
-cannot know whether an already delivered section was "compacted away" by any
-context-compression actions, you may re-fetch and re-deliver a section if you
-deem it appropriate when you see a new request or reach that aspect.
+`fetch_on_demand` (each `{id, title, gloss}`) with `get_kit(name, sections=[…])`
+when you reach that aspect. To preserve token space, the server now dedups per
+MCP session: `always_load` sections it already inlined earlier this session are
+omitted from `always_load_markdown` and listed under the kit's
+`already_delivered` instead — you already hold them, so do not re-request them by
+default. Note that because this server cannot know whether an already delivered
+section was "compacted away" by any context-compression actions, each
+`already_delivered` entry carries a `get_kit(name, sections=[…])` re-fetch note;
+use it to re-deliver a section if it is no longer in your context.
 
 Use the manual loop below only when you need finer control: you have already
 mapped the task to explicit traits, you want to inspect ranking diagnostics,

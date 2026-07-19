@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import resolver
+from app import resolver, session_ledger
 
 
 def _write_kit_version(
@@ -123,6 +123,8 @@ def _use_kit_root(
     monkeypatch.setattr("app.private_kits.get_settings", lambda: fake_settings)
     # No embeddings, no LLM: force the lexical floor for these tests.
     monkeypatch.setattr(resolver, "_build_trait_engines", lambda: [])
+    # Isolate the in-memory session dedup ledger between tests.
+    session_ledger.reset_for_tests()
 
 
 def test_empty_task_raises() -> None:
@@ -273,21 +275,24 @@ def test_hybrid_assembly_inlines_always_load_and_lists_rest() -> None:
     alpha = kits["kit-alpha"]
     # always_load content is inlined...
     assert "Keep it layered." in alpha["always_load_markdown"]
+    offered = {s["id"]: s for s in alpha["fetch_on_demand"]}
     # ...and the always_load section is not offered for on-demand fetch.
-    assert "invariant" not in alpha["fetch_on_demand"]
-    # the relevant non-always_load section ("endpoints") is offered.
-    assert "endpoints" in alpha["fetch_on_demand"]
-    # section descriptors carry the always_load flag
-    by_id = {s["id"]: s for s in alpha["sections"]}
-    assert by_id["invariant"]["always_load"] is True
-    assert by_id["endpoints"]["always_load"] is False
+    assert "invariant" not in offered
+    # the relevant non-always_load section ("endpoints") is offered, carrying
+    # a title and gloss so the agent can decide without a get_kit_outline call.
+    assert "endpoints" in offered
+    assert offered["endpoints"]["title"]
+    assert offered["endpoints"]["gloss"]
+    # the slim shape drops the standalone descriptor list.
+    assert "sections" not in alpha
 
 
 def test_irrelevant_sections_are_not_offered() -> None:
     # "testing" has no lexical overlap with the task -> not surfaced.
     out = resolver.resolve_kits(task="add a FastAPI REST endpoint")
     alpha = {k["name"]: k for k in out["kits"]}["kit-alpha"]
-    assert "testing" not in alpha["fetch_on_demand"]
+    offered_ids = [s["id"] for s in alpha["fetch_on_demand"]]
+    assert "testing" not in offered_ids
 
 
 def test_max_sections_per_kit_bounds_on_demand_list() -> None:
@@ -592,3 +597,142 @@ def test_single_version_kit_has_no_advisory(kit_root: Path) -> None:
     alpha = _alpha(out)
     assert alpha["version"] == "v1"
     assert "version_advisory" not in alpha
+
+
+# --- Session-scoped dedup ---------------------------------------------------
+
+_TASK = "add a FastAPI REST endpoint"
+
+
+def _dedup_settings(*, enabled: bool = True) -> object:
+    """Minimal stand-in settings enabling/disabling resolve dedup."""
+    return type(
+        "S",
+        (),
+        {
+            "resolve_dedup_enabled": enabled,
+            "resolve_dedup_ttl_seconds": 3600,
+            "resolve_dedup_max_sessions": 2048,
+        },
+    )()
+
+
+def test_dedup_suppresses_always_load_on_repeat_same_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    first = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-1"))
+    assert "Keep it layered." in first["always_load_markdown"]
+    assert "already_delivered" not in first
+
+    second = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-1"))
+    # Already delivered this session -> not re-inlined...
+    assert second["always_load_markdown"] == ""
+    # ...surfaced as a self-healing re-fetch pointer instead.
+    delivered = {e["id"]: e for e in second["already_delivered"]}
+    assert "invariant" in delivered
+    assert (
+        'get_kit("kit-alpha", sections=["invariant"])'
+        in delivered["invariant"]["note"]
+    )
+
+
+def test_dedup_different_session_still_inlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    _alpha(resolver.resolve_kits(task=_TASK, session_id="s-1"))
+    other = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-2"))
+    # A fresh session is a fresh context window: inline in full again.
+    assert "Keep it layered." in other["always_load_markdown"]
+    assert "already_delivered" not in other
+
+
+def test_dedup_disabled_flag_always_inlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        resolver, "get_settings", lambda: _dedup_settings(enabled=False)
+    )
+    resolver.resolve_kits(task=_TASK, session_id="s-1")
+    second = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-1"))
+    assert "Keep it layered." in second["always_load_markdown"]
+    assert "already_delivered" not in second
+
+
+def test_dedup_no_session_id_always_inlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    # The eval runner / a client without a session pass no session_id.
+    resolver.resolve_kits(task=_TASK)
+    second = _alpha(resolver.resolve_kits(task=_TASK))
+    assert "Keep it layered." in second["always_load_markdown"]
+    assert "already_delivered" not in second
+
+
+def test_dedup_keys_on_version(
+    monkeypatch: pytest.MonkeyPatch, kit_root: Path
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    _add_kit_alpha_v2(kit_root)
+    # Deliver v1's always_load, then resolve v2 in the same session.
+    resolver.resolve_kits(task=_TASK, pins={"kit-alpha": "v1"}, session_id="s")
+    v2 = _alpha(
+        resolver.resolve_kits(
+            task=_TASK, pins={"kit-alpha": "v2"}, session_id="s"
+        )
+    )
+    # A different major is a different ledger key -> still inlined.
+    assert "v2" in v2["always_load_markdown"]
+    assert "already_delivered" not in v2
+
+
+def test_dedup_reports_suppressed_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    recorded: list[int] = []
+    monkeypatch.setattr(
+        resolver.telemetry,
+        "record_resolve",
+        lambda **kw: recorded.append(kw.get("suppressed_tokens", 0)),
+    )
+    resolver.resolve_kits(task=_TASK, session_id="s-1")
+    resolver.resolve_kits(task=_TASK, session_id="s-1")
+    # First resolve suppresses nothing; the repeat suppresses the always_load.
+    assert recorded[0] == 0
+    assert recorded[1] > 0
+
+
+def test_dedup_never_suppresses_undelivered_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Safety invariant: a section is only ever suppressed after being inlined
+    # at least once this session. A brand-new session never suppresses, even
+    # after another session delivered the same kit.
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+    resolver.resolve_kits(task=_TASK, session_id="s-1")
+    fresh = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-2"))
+    assert "Keep it layered." in fresh["always_load_markdown"]
+    assert "already_delivered" not in fresh
+
+
+def test_dedup_ledger_error_degrades_to_full_inline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(resolver, "get_settings", lambda: _dedup_settings())
+
+    class _Boom:
+        def filter_already_delivered(self, *a, **k):
+            raise RuntimeError("ledger down")
+
+        def record_delivered(self, *a, **k):
+            raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(resolver, "_dedup_ledger", lambda _sid: _Boom())
+    # filter_already_delivered raising must not break the resolve; the ledger
+    # contract returns "all fresh" on error, but even a hard raise is caught
+    # by the resolver falling back to full inline.
+    out = _alpha(resolver.resolve_kits(task=_TASK, session_id="s-1"))
+    assert "Keep it layered." in out["always_load_markdown"]

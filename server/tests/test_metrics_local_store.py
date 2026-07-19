@@ -99,6 +99,32 @@ def test_tokens_timeseries_splits_delivered_and_offered(
     assert len(series) == 1
     assert series[0]["delivered"] == 100
     assert series[0]["offered"] == 25
+    assert series[0]["suppressed"] == 0
+
+
+def test_tokens_timeseries_reports_suppressed_bucket(
+    store: ls.LocalMetricsStore,
+) -> None:
+    store.record_resolve(
+        engine="lexical",
+        confidence="high",
+        coverage=1.0,
+        broadening=False,
+        deliveries=[
+            ("kit-a", "inlined", 0),
+            ("kit-a", "suppressed", 80),
+        ],
+        delivered_tokens=0,
+        offered_tokens=0,
+        suppressed_tokens=80,
+    )
+    series = store.tokens_timeseries(0.0)
+    assert len(series) == 1
+    assert series[0]["suppressed"] == 80
+    # Suppressed content is a saving, not a delivery: its tokens are excluded
+    # from usage (the kit still shows via its 0-token inlined row).
+    usage = {r["kit"]: r for r in store.kit_usage(0.0)}
+    assert usage["kit-a"]["tokens"] == 0
 
 
 def test_tokens_timeseries_hourly_vs_daily_buckets(
@@ -454,17 +480,29 @@ def test_init_migrates_pre_existing_db_adds_project_id_and_uses_table(
         for r in s._conn.execute("PRAGMA table_info(resolve_events)")
     }
     assert "project_id" in cols
-    # Old row reads back NULL for the new column, data preserved.
+    assert "suppressed_tokens" in cols
+    # Old row reads back defaults for the new columns, data preserved.
     row = s._conn.execute(
-        "SELECT project_id, engine FROM resolve_events"
+        "SELECT project_id, suppressed_tokens, engine FROM resolve_events"
     ).fetchone()
     assert row["project_id"] is None
+    assert row["suppressed_tokens"] == 0
     assert row["engine"] == "lexical"
     # The new table is usable end-to-end.
     s.record_kit_version_use(kit="k", version="v1", project_id="qm_x")
     assert s.version_adoption("k", 0.0, "1d")["buckets"][0]["counts"] == {
         "v1": 1
     }
+    # A resolve carrying suppressed_tokens records against the migrated column.
+    s.record_resolve(
+        engine="lexical", confidence="high", coverage=1.0, broadening=False,
+        deliveries=[], delivered_tokens=0, offered_tokens=0,
+        suppressed_tokens=42,
+    )
+    total = s._conn.execute(
+        "SELECT MAX(suppressed_tokens) AS m FROM resolve_events"
+    ).fetchone()
+    assert total["m"] == 42
 
 
 def test_record_resolve_persists_project_id(

@@ -74,6 +74,17 @@ def test_overview_reflects_recorded_usage(client: TestClient) -> None:
     assert usage["kit-a"]["tokens"] == 123
 
 
+def test_overview_reports_suppressed_tokens(client: TestClient) -> None:
+    store = local_store.get_store()
+    store.record_resolve(
+        engine="lexical", confidence="high", coverage=1.0, broadening=False,
+        deliveries=[("kit-a", "suppressed", 64)],
+        delivered_tokens=0, offered_tokens=0, suppressed_tokens=64,
+    )
+    body = client.get("/api/metrics/overview?window=24h").json()
+    assert sum(p["suppressed"] for p in body["tokens_timeseries"]) == 64
+
+
 def test_unknown_window_falls_back_to_default(client: TestClient) -> None:
     resp = client.get("/api/metrics/overview?window=bogus")
     assert resp.status_code == 200

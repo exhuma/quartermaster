@@ -6,7 +6,14 @@ select → explain → outline → get) into a single server-side call. It infer
 the project traits a task touches, feeds them to the existing deterministic
 scorer :func:`app.kits.select_kits_v2` (unchanged), then assembles a hybrid
 response: the recommendation, the ``always_load`` sections inlined, and the
-other relevant section ids left for the client to fetch on demand.
+other relevant sections left for the client to fetch on demand.
+
+Within one MCP session (passed as ``session_id``), ``always_load`` sections
+already inlined earlier are omitted from ``always_load_markdown`` and listed
+under each kit's ``already_delivered`` instead (see :mod:`app.session_ledger`),
+so a repeat resolve does not re-occupy the caller's context window with content
+it already holds. Such a section is re-fetchable via ``get_kit`` if it was
+compacted away, keeping the response self-healing.
 
 Trait inference runs a fallback chain — optional LLM, then local embeddings,
 then a lexical floor that is always available, so the tool never hard-fails.
@@ -24,7 +31,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app import telemetry
+from app import session_ledger, telemetry
 from app.config import get_settings
 from app.gap import detect_gap
 from app.identity import current_sub
@@ -277,14 +284,29 @@ def _infer(
     return chosen_engine, chosen
 
 
-def _section_descriptor(ref: SectionRef, relevance: float) -> dict[str, Any]:
-    """Return the public per-section descriptor."""
+def _section_descriptor(ref: SectionRef) -> dict[str, Any]:
+    """Return the public descriptor for an on-demand (fetchable) section."""
     return {
         "id": ref.section_id,
         "title": ref.title,
         "gloss": ref.gloss,
-        "relevance": round(float(relevance), 3),
-        "always_load": ref.always_load,
+    }
+
+
+def _already_delivered_entry(kit: str, ref: SectionRef) -> dict[str, Any]:
+    """Describe an ``always_load`` section suppressed as already delivered.
+
+    Carries a self-healing pointer: the section can be re-fetched with
+    ``get_kit`` if it was compacted out of the caller's context.
+    """
+    return {
+        "id": ref.section_id,
+        "title": ref.title,
+        "note": (
+            "Delivered earlier this session (always_load); omitted to "
+            "preserve context. If it was compacted out, re-fetch with "
+            f'get_kit("{kit}", sections=["{ref.section_id}"]).'
+        ),
     }
 
 
@@ -294,6 +316,60 @@ def _suggest_gap_title(task: str) -> str:
     if len(collapsed) <= _MAX_GAP_TITLE_LEN:
         return collapsed
     return collapsed[: _MAX_GAP_TITLE_LEN - 1].rstrip() + "…"
+
+
+def _dedup_ledger(
+    session_id: str | None,
+) -> session_ledger.SessionDeliveryLedger | None:
+    """Return the session dedup ledger, or ``None`` to inline everything.
+
+    ``None`` whenever there is no session id, dedup is disabled, or settings
+    are unavailable — the resolver then behaves exactly as it did before dedup.
+    """
+    if not session_id:
+        return None
+    try:
+        return session_ledger.get_ledger(get_settings())
+    except Exception:
+        return None
+
+
+def _split_always(
+    ledger: session_ledger.SessionDeliveryLedger | None,
+    session_id: str | None,
+    kit: str,
+    version: str,
+    always_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split always_load ids into (fresh, already-delivered) for the session.
+
+    Defaults to all-fresh (inline everything) when there is no ledger or on any
+    error, so dedup can never break a resolve.
+    """
+    if ledger is None or not always_ids:
+        return always_ids, []
+    try:
+        return ledger.filter_already_delivered(
+            session_id, kit, version, always_ids
+        )
+    except Exception:
+        return always_ids, []
+
+
+def _record_delivered(
+    ledger: session_ledger.SessionDeliveryLedger | None,
+    session_id: str | None,
+    kit: str,
+    version: str,
+    fresh_ids: list[str],
+) -> None:
+    """Record the ids just inlined; best-effort, never raises."""
+    if ledger is None or not fresh_ids:
+        return
+    try:
+        ledger.record_delivered(session_id, kit, version, fresh_ids)
+    except Exception:
+        return
 
 
 def _gap_block(signal: Any) -> dict[str, Any] | None:
@@ -369,6 +445,7 @@ def resolve_kits(
     section_ranker: TraitEngine | None = None,
     pins: dict[str, str] | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Resolve a natural-language task to recommended kits and content.
@@ -390,6 +467,10 @@ def resolve_kits(
         ``version_advisory`` attached.
     :param project_id: Optional stable repo label from ``.quartermaster.toml``,
         recorded with adoption telemetry only.
+    :param session_id: The caller's MCP session id. When present (and dedup is
+        enabled), ``always_load`` sections already inlined in this session are
+        omitted and listed under ``already_delivered`` instead. ``None`` (e.g.
+        the eval runner or a client without a session) inlines everything.
     :returns: The hybrid response described in this module's docstring.
     :raises ValueError: If *task* is empty.
     """
@@ -447,9 +528,13 @@ def resolve_kits(
         if gap_signal is not None:
             telemetry.record_gap_detected()
 
+    # Session-scoped dedup ledger (or None → inline everything, as before).
+    dedup_ledger = _dedup_ledger(session_id)
+
     kits_out: list[dict[str, Any]] = []
     total_delivered = 0
     total_offered = 0
+    total_suppressed = 0
     # Per-kit deliveries for the OTEL-independent local store, recorded once
     # after the loop so the "delivered together" set is kept for co-occurrence.
     local_deliveries: list[tuple[str, str, int]] = []
@@ -467,40 +552,53 @@ def resolve_kits(
             rest = [r for r in refs if not r.always_load]
 
             ranked = ranker.rank_sections(task, rest)
-            relevance_by_id = {r.section_id: score for r, score in ranked}
             relevant = [
                 (r, score) for r, score in ranked if score > 0
             ][:max_sections_per_kit]
 
-            descriptors = [
-                _section_descriptor(r, relevance_by_id.get(r.section_id, 0.0))
-                for r in always
-            ]
-            descriptors += [
-                _section_descriptor(r, score) for r, score in relevant
-            ]
-
+            # Inline only the always_load sections not already delivered this
+            # session; the rest are surfaced as re-fetchable pointers.
             always_ids = [r.section_id for r in always]
+            fresh_ids, already_ids = _split_always(
+                dedup_ledger, session_id, name, version, always_ids
+            )
+
             markdown = (
-                read_kit(name, version, sections=always_ids)
-                if always_ids
+                read_kit(name, version, sections=fresh_ids)
+                if fresh_ids
                 else ""
+            )
+            # Record only what was actually inlined, so a section can be
+            # suppressed later only if it was delivered at least once here.
+            _record_delivered(
+                dedup_ledger, session_id, name, version, fresh_ids
             )
 
             offered_ids = [r.section_id for r, _ in relevant]
+            fetch_on_demand = [_section_descriptor(r) for r, _ in relevant]
+            already_refs = [
+                r for r in always if r.section_id in set(already_ids)
+            ]
             delivered_tokens = count_tokens(markdown) if markdown else 0
-            # Offered sections are not read here (they are fetched on demand),
-            # so size them from the known byte counts rather than re-reading.
+            # Offered and suppressed sections are not read here, so size them
+            # from the known byte counts rather than re-reading them.
             offered_tokens = sum(
                 estimate_tokens_from_bytes(r.bytes) for r, _ in relevant
             )
+            suppressed_tokens = sum(
+                estimate_tokens_from_bytes(r.bytes) for r in already_refs
+            )
             total_delivered += delivered_tokens
             total_offered += offered_tokens
+            total_suppressed += suppressed_tokens
+            # Always emit an "inlined" row (even at 0 tokens): a kit whose
+            # always_load was fully suppressed is still in the caller's context,
+            # so it must still count for co-occurrence and per-user memory.
             telemetry.record_kit_delivery(
                 kit=name,
                 disposition="inlined",
                 tokens=delivered_tokens,
-                section_ids=always_ids,
+                section_ids=fresh_ids,
             )
             local_deliveries.append((name, "inlined", delivered_tokens))
             if offered_ids:
@@ -511,6 +609,16 @@ def resolve_kits(
                     section_ids=offered_ids,
                 )
                 local_deliveries.append((name, "offered", offered_tokens))
+            if already_ids:
+                telemetry.record_kit_delivery(
+                    kit=name,
+                    disposition="suppressed",
+                    tokens=suppressed_tokens,
+                    section_ids=already_ids,
+                )
+                local_deliveries.append(
+                    (name, "suppressed", suppressed_tokens)
+                )
 
             kit_out = {
                 "name": name,
@@ -519,10 +627,13 @@ def resolve_kits(
                 "confidence": candidate["confidence"],
                 "reasons": candidate["reasons"],
                 "summary": candidate["summary"],
-                "sections": descriptors,
                 "always_load_markdown": markdown,
-                "fetch_on_demand": offered_ids,
+                "fetch_on_demand": fetch_on_demand,
             }
+            if already_refs:
+                kit_out["already_delivered"] = [
+                    _already_delivered_entry(name, r) for r in already_refs
+                ]
             if advisory is not None:
                 kit_out["version_advisory"] = advisory
             kits_out.append(kit_out)
@@ -541,6 +652,7 @@ def resolve_kits(
                 "kits": len(kits_out),
                 "delivered_tokens": total_delivered,
                 "offered_tokens": total_offered,
+                "suppressed_tokens": total_suppressed,
             },
         )
 
@@ -551,6 +663,7 @@ def resolve_kits(
         broadening_recommended=selection["broadening_recommended"],
         delivered_tokens=total_delivered,
         offered_tokens=total_offered,
+        suppressed_tokens=total_suppressed,
         traits={
             "languages": inferred.languages,
             "frameworks": inferred.frameworks,
@@ -571,6 +684,7 @@ def resolve_kits(
         deliveries=local_deliveries,
         delivered_tokens=total_delivered,
         offered_tokens=total_offered,
+        suppressed_tokens=total_suppressed,
         subject=current_sub(),
         project_id=project_id,
         traits_json=json.dumps(

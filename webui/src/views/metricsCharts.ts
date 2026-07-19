@@ -174,7 +174,10 @@ export function tokensOption(
 ): EChartsOption {
   return {
     tooltip: { trigger: 'axis', formatter: timeSeriesTooltip(granularity) },
-    legend: { data: ['Delivered', 'Offered (on-demand)'], top: 0 },
+    legend: {
+      data: ['Delivered', 'Offered (on-demand)', 'Suppressed (dedup savings)'],
+      top: 0,
+    },
     grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
     xAxis: timeAxis(granularity, bounds),
     yAxis: { type: 'value', name: 'tokens' },
@@ -195,6 +198,14 @@ export function tokensOption(
         data: points.map((p) => [bucketToEpochMs(p.day), p.offered]),
         itemStyle: { color: c.secondary },
         lineStyle: { color: c.secondary, type: 'dashed' },
+      },
+      {
+        name: 'Suppressed (dedup savings)',
+        type: 'line',
+        smooth: true,
+        data: points.map((p) => [bucketToEpochMs(p.day), p.suppressed]),
+        itemStyle: { color: c.success },
+        lineStyle: { color: c.success, type: 'dotted' },
       },
     ],
   }
