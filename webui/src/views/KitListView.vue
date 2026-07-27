@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import { useKits } from '@/composables/useKits'
+import { useKitSearch } from '@/composables/useKitSearch'
 import { useMe } from '@/composables/useMe'
 import SectionHeader from '@/components/SectionHeader.vue'
 import StatusChip from '@/components/StatusChip.vue'
+import type { KitInfo, KitSearchSectionMatch } from '@/types/kit'
 
 const { kits, error, fetchKits, createKit, deleteKit } = useKits()
+const {
+  results: searchResults,
+  error: searchError,
+  search: searchKits,
+  clear: clearSearch,
+} = useKitSearch()
 const { isEditor, fetchMe } = useMe()
 
 const headers = [
@@ -32,6 +40,59 @@ const nameRule = (v: string) =>
 onMounted(() => {
   fetchKits()
   fetchMe()
+})
+
+// --- Search kits and instructions --------------------------------------
+
+const searchQuery = ref('')
+const expanded = ref<string[]>([])
+let debounceHandle: ReturnType<typeof setTimeout> | undefined
+
+const searchActive = computed(() => searchQuery.value.trim().length >= 2)
+
+interface DisplayKit extends KitInfo {
+  matchedFields?: string[]
+  matchedSections?: KitSearchSectionMatch[]
+}
+
+// While a search is active, drive the table from search results instead of
+// the plain catalog list — enriched with the full KitInfo row (layer,
+// versions, editable) so the columns render the same either way.
+const displayedKits = computed<DisplayKit[]>(() => {
+  if (!searchActive.value) {
+    return kits.value
+  }
+  const byName = new Map(kits.value.map((k) => [k.name, k]))
+  return searchResults.value.map((r) => {
+    const base = byName.get(r.name)
+    return {
+      name: r.name,
+      description: r.summary,
+      versions: base?.versions ?? [r.version],
+      latest_version: base?.latest_version ?? r.version,
+      source_layer: base?.source_layer ?? null,
+      editable: base?.editable ?? false,
+      broken: base?.broken ?? false,
+      error: base?.error ?? null,
+      matchedFields: r.matched_fields,
+      matchedSections: r.sections,
+    }
+  })
+})
+
+watch(searchQuery, (value) => {
+  if (debounceHandle) {
+    clearTimeout(debounceHandle)
+  }
+  const query = value.trim()
+  if (query.length < 2) {
+    expanded.value = []
+    clearSearch()
+    return
+  }
+  debounceHandle = setTimeout(() => {
+    void searchKits(query)
+  }, 300)
 })
 
 async function submitCreate(): Promise<void> {
@@ -83,12 +144,31 @@ async function confirmDelete(): Promise<void> {
       class="mb-4"
       :text="error"
     />
+    <v-alert
+      v-if="searchError"
+      type="error"
+      variant="tonal"
+      class="mb-4"
+      :text="searchError"
+    />
+
+    <v-text-field
+      v-model="searchQuery"
+      label="Search kits and instructions"
+      prepend-inner-icon="mdi-magnify"
+      density="compact"
+      clearable
+      class="mb-4"
+      hide-details
+    />
 
     <v-card>
       <v-data-table
         :headers="headers"
-        :items="kits"
+        :items="displayedKits"
         item-value="name"
+        :show-expand="searchActive"
+        v-model:expanded="expanded"
         :row-props="(d) => ({ class: d.item.broken ? 'broken-row' : '' })"
       >
         <template #item.name="{ item }">
@@ -139,6 +219,57 @@ async function confirmDelete(): Promise<void> {
             color="error"
             @click="deleteTarget = item.name"
           />
+        </template>
+        <template #expanded-row="{ item, columns }">
+          <tr>
+            <td :colspan="columns.length" class="py-3">
+              <div
+                v-if="item.matchedFields?.length"
+                class="mb-2 d-flex align-center ga-1 flex-wrap"
+              >
+                <span class="text-caption text-medium-emphasis mr-1">
+                  Matched:
+                </span>
+                <v-chip
+                  v-for="field in item.matchedFields"
+                  :key="field"
+                  size="x-small"
+                  variant="tonal"
+                >
+                  {{ field }}
+                </v-chip>
+              </div>
+              <v-list
+                v-if="item.matchedSections?.length"
+                density="compact"
+                class="bg-transparent"
+              >
+                <v-list-item
+                  v-for="section in item.matchedSections"
+                  :key="section.id"
+                  :to="{
+                    name: 'kit-edit',
+                    params: {
+                      name: item.name,
+                      version: item.latest_version,
+                    },
+                    query: { section: section.id },
+                  }"
+                >
+                  <v-list-item-title>{{ section.title }}</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ section.snippet }}
+                  </v-list-item-subtitle>
+                </v-list-item>
+              </v-list>
+              <span
+                v-if="!item.matchedFields?.length && !item.matchedSections?.length"
+                class="text-caption text-medium-emphasis"
+              >
+                No content matches beyond name/summary.
+              </span>
+            </td>
+          </tr>
         </template>
       </v-data-table>
     </v-card>

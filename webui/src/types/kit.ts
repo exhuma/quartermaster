@@ -81,6 +81,27 @@ export interface TraitVocab {
   optional_signals: string[]
 }
 
+export interface KitSearchSectionMatch {
+  id: string
+  title: string
+  snippet: string
+  score: number
+}
+
+export interface KitSearchResult {
+  name: string
+  version: string
+  score: number
+  summary: string
+  matched_fields: string[]
+  sections: KitSearchSectionMatch[]
+}
+
+export interface KitSearchResponse {
+  query: string
+  results: KitSearchResult[]
+}
+
 export interface VersionCompare {
   changes: { version: string; summary: string }[]
   user_facing_warning: boolean

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { useKitEditor } from '@/composables/useKitEditor'
 import { useMe } from '@/composables/useMe'
@@ -12,6 +13,7 @@ const props = defineProps<{ name: string; version: string }>()
 
 const editor = useKitEditor()
 const { isEditor, fetchMe } = useMe()
+const route = useRoute()
 
 const sections = ref<SectionMeta[]>([])
 const selectedId = ref<string | null>(null)
@@ -139,8 +141,16 @@ onMounted(async () => {
     kitEditable.value = false
   }
   await refreshOutline()
-  if (sections.value.length > 0) {
-    await select(sections.value[0].id)
+  // A search-result link may request a specific section via ?section=; fall
+  // back to the first section when absent or unknown.
+  const requested =
+    typeof route.query.section === 'string' ? route.query.section : null
+  const target =
+    requested && sections.value.some((s) => s.id === requested)
+      ? requested
+      : sections.value[0]?.id
+  if (target) {
+    await select(target)
   }
 })
 </script>
