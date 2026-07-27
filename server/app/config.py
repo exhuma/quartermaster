@@ -445,7 +445,7 @@ class Settings(BaseSettings):
         data-volume path in production (e.g. ``/data/metrics.db``) so the
         rolling window survives container restarts.
     :param metrics_local_retention_days: How many days of usage events the local
-        store keeps before pruning (default 7). Long-term history is delegated
+        store keeps before pruning (default 30). Long-term history is delegated
         to OpenTelemetry; this store is a short, capped complement.
     """
 
@@ -573,7 +573,7 @@ class Settings(BaseSettings):
     # Metrics dashboard. Short rolling window; long-term history is OTEL's job.
     metrics_local_enabled: bool = True
     metrics_local_db_path: Path = _METRICS_LOCAL_DB_DEFAULT
-    metrics_local_retention_days: int = 7
+    metrics_local_retention_days: int = 30
     # Kit version pinning (see app/kits.py resolve_effective_version). Repos
     # record their per-kit major in a repo-side .quartermaster.toml; the server
     # is stateless about pins. These toggles cover the two things the server

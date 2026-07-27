@@ -947,7 +947,7 @@ def init(settings: Any) -> LocalMetricsStore | None:
             store = LocalMetricsStore(
                 db_path=getattr(settings, "metrics_local_db_path"),
                 retention_days=getattr(
-                    settings, "metrics_local_retention_days", 7
+                    settings, "metrics_local_retention_days", 30
                 ),
                 version_telemetry_enabled=getattr(
                     settings, "version_telemetry_enabled", True

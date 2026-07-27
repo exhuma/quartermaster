@@ -33,7 +33,7 @@ small, **always-on local store** that feeds a **Metrics** page in the web UI.
   works regardless of OTEL health (it shows the current OTLP state as a badge:
   `exporting` / `configured` / `failing` / `not configured`).
 - **Short rolling window.** Only the last `QM_METRICS_LOCAL_RETENTION_DAYS`
-  (default **7**) of events are kept; older rows are pruned to bound storage.
+  (default **30**) of events are kept; older rows are pruned to bound storage.
   **Long-term history is delegated to OTEL → Grafana** (sections below); this
   store is a capped complement, not a replacement.
 - **Survives restarts.** The database lives on the data volume
@@ -58,7 +58,7 @@ caption on every chart:
 |---|---|---|
 | `QM_METRICS_LOCAL_ENABLED` | `true` | Record usage into the local store. Set false to disable it entirely. |
 | `QM_METRICS_LOCAL_DB_PATH` | `server/var/metrics.db` (dev) · `/data/metrics.db` (image) | SQLite file for the rolling window. Put it on the data volume in production. |
-| `QM_METRICS_LOCAL_RETENTION_DAYS` | `7` | Days of events kept before pruning. |
+| `QM_METRICS_LOCAL_RETENTION_DAYS` | `30` | Days of events kept before pruning. |
 
 The bundle is served read-only at `GET /api/metrics/overview?window=24h|7d|30d`
 (authenticated like the rest of `/api`; the window is capped to the retention).

@@ -47,6 +47,25 @@ const WINDOW_SECONDS: Record<MetricsWindow, number> = {
   '30d': 2_592_000,
 }
 
+// Grey out picker options the server can't actually satisfy (e.g. 30d when
+// retention is configured below 30 days), instead of letting them silently
+// return retention-capped data indistinguishable from a shorter window.
+// Undefined retention (no payload yet) means "don't disable anything yet".
+const windowOptions = computed(() => {
+  const retention = overview.value?.meta.retention_days
+  return windows.map((w) => {
+    const requiredDays = WINDOW_SECONDS[w.value] / 86_400
+    const disabled = retention !== undefined && requiredDays > retention
+    return {
+      ...w,
+      disabled,
+      tooltip: disabled
+        ? `Needs ${requiredDays}-day retention; server keeps ${retention} days.`
+        : undefined,
+    }
+  })
+})
+
 // Epoch-ms window the time-series x-axes should span, so the selected timespan
 // always shows (even sparse) instead of collapsing to the data extent. Mirror
 // the server's retention cap (min(window, retention)); undefined until the
@@ -185,9 +204,23 @@ const health = computed(() => overview.value?.resolve_health)
         divided
         @update:model-value="(w) => setWindow(w as MetricsWindow)"
       >
-        <v-btn v-for="w in windows" :key="w.value" :value="w.value">
-          {{ w.label }}
-        </v-btn>
+        <v-tooltip
+          v-for="w in windowOptions"
+          :key="w.value"
+          :disabled="!w.disabled"
+          :text="w.tooltip"
+          location="bottom"
+        >
+          <template #activator="{ props: tooltipProps }">
+            <v-btn
+              v-bind="tooltipProps"
+              :value="w.value"
+              :disabled="w.disabled"
+            >
+              {{ w.label }}
+            </v-btn>
+          </template>
+        </v-tooltip>
       </v-btn-toggle>
       <v-switch
         :model-value="granularity"
