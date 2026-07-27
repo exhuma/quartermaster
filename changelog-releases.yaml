@@ -9,6 +9,17 @@ meta:
   version: "1.0"
 
 releases:
+  "2026.7.27":
+    date: 2026-07-27
+    notes: |
+      Quartermaster's first beta release. Kit search now reaches inside
+      instruction content, not just declared metadata: a new catalog
+      search box and `search_kit_content` MCP tool find a kit by its
+      name, summary, applicability fields, or any section's text —
+      including matches that live only in a section body. `resolve_kits`
+      also got leaner: a per-session ledger stops re-sending
+      `always_load` content already delivered this session, and the
+      default response drops diagnostic-only fields.
   "2026.7.14":
     date: 2026-07-14
     notes: |

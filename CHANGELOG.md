@@ -1,6 +1,48 @@
 # Changelog
 
 
+## Release 2026.7.27 (2026-07-27)
+
+Quartermaster's first beta release. Kit search now reaches inside
+
+instruction content, not just declared metadata: a new catalog
+search 
+box and `search_kit_content` MCP tool find a kit by its
+name, summary,
+ applicability fields, or any section's text —
+including matches that 
+live only in a section body. `resolve_kits`
+also got leaner: a per-
+session ledger stops re-sending
+`always_load` content already 
+delivered this session, and the
+default response drops diagnostic-only
+ fields.
+
+
+
+### Added
+- ☆ **[MCP] Free-text search across kit metadata and instruction
+  content** *@ 2026.7.27b1*
+
+  New `search_kit_content` tool complements the trait-based `select_kits`/`resolve_kits` for literal-phrase lookups — finding which kit documents a specific config key, error message, or code pattern — by searching kit name, summary, applicability fields, and every section's title/gloss/body.
+
+- [UI] Search box on the kit catalog page *@ 2026.7.27b1*
+
+  The catalog page now has a debounced search box matching kit metadata and instruction content — a matched kit expands to show which section matched with a snippet, linking straight to that section in the kit editor.
+
+- [API] `GET /api/search` for free-text kit search *@ 2026.7.27b1*
+
+  Searches kit metadata and instruction content and returns ranked kits with matched applicability fields and matched section snippets, powering the new web-UI search box and the `search_kit_content` MCP tool.
+
+
+### Changed
+- ☆ **[MCP] `resolve_kits` dedupes always-load content per session,
+  leaner payload** *@ 2026.7.27b1*
+
+  A per-session ledger omits `always_load` sections already inlined earlier in the same session (listed under a new self-healing `already_delivered` field with a `get_kit` re-fetch note), and the default response drops fields redundant with the opt-in `include_diagnostics` block. Dedup savings are visible as a "Suppressed" series/KPI in the web UI Metrics view.
+
+
 ## Release 2026.7.14 (2026-07-14)
 
 Quartermaster can now run fully without authentication for trusted
