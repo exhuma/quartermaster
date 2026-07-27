@@ -1555,6 +1555,168 @@ def read_kit(
     return "\n\n".join(bodies) + "\n"
 
 
+# Field weights for kit-level (applicability) search matches — name/summary
+# are the strongest signals, optional_signals the weakest, mirroring the
+# ordering (if not the exact scale) of WEIGHT_BY_DIMENSION above.
+_SEARCH_FIELD_WEIGHTS = {
+    "name": 30,
+    "summary": 20,
+    "domains": 14,
+    "languages": 10,
+    "frameworks": 10,
+    "contexts": 8,
+    "optional_signals": 6,
+}
+_SEARCH_SECTION_TITLE_WEIGHT = 12
+_SEARCH_SECTION_GLOSS_WEIGHT = 6
+_SEARCH_SECTION_BODY_WEIGHT = 1
+_SEARCH_SNIPPET_RADIUS = 60
+_SEARCH_MAX_SECTIONS_PER_KIT = 5
+_SEARCH_MAX_MATCHED_FIELDS = 8
+
+
+def _search_snippet(body: str, term: str) -> str | None:
+    """Return a short excerpt of *body* around the first case-insensitive
+    occurrence of *term*, or ``None`` if *term* is not present."""
+    idx = body.lower().find(term)
+    if idx == -1:
+        return None
+    start = max(0, idx - _SEARCH_SNIPPET_RADIUS)
+    end = min(len(body), idx + len(term) + _SEARCH_SNIPPET_RADIUS)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(body) else ""
+    return prefix + body[start:end].strip() + suffix
+
+
+def search_catalog(
+    query: str, limit: int = 20, subject: Any = _CTX_SUBJECT
+) -> dict[str, Any]:
+    """
+    Free-text search across kit applicability metadata and instruction content.
+
+    Complements the trait-based selector (:func:`select_kits_v2`) for
+    literal-phrase lookups that don't map cleanly onto the trait
+    vocabulary — e.g. finding which kit documents a specific config key,
+    error message, or code pattern. Scans every visible kit's name,
+    summary, applicability fields, and every section's title/gloss/body
+    (latest version only; broken kits are skipped, same as the selector).
+
+    This reads every candidate kit's full section content on every call —
+    there is no index or cache. That is deliberately simple for now; if
+    catalog size makes it slow, ``catalog_fingerprint()`` (see
+    ``app.traits``) is the natural cache key to add later.
+
+    :param query: Free-text search phrase. A blank/whitespace-only query
+        returns no results.
+    :param limit: Maximum number of matching kits to return.
+    :param subject: Caller identity for private-kit visibility (see
+        :func:`_caller_layers`); defaults to the ambient identity
+        contextvar, so results match exactly what :func:`list_all_kits`
+        would show the same caller (including their own private kits).
+    :returns: ``{"query": query, "results": [...]}``, each result being
+        ``{name, version, score, summary, matched_fields, sections}``.
+        ``sections`` is capped to the top-scoring matches per kit and
+        ``matched_fields`` lists which applicability fields matched (e.g.
+        ``"domains:auth"``), each capped to a small number for brevity.
+    """
+    terms = [t for t in query.strip().lower().split() if t]
+    if not terms:
+        return {"query": query, "results": []}
+
+    entries, _warnings = _catalog_entries(subject=subject)
+    results: list[dict[str, Any]] = []
+
+    for info, applicability in entries:
+        score = 0.0
+        matched_fields: list[str] = []
+
+        def _match_scalar(field_name: str, value: str) -> None:
+            # Scalar fields (name/summary) are free text, not short enum-like
+            # tokens, so record just the field name — the full value would
+            # make an unwieldy UI chip.
+            nonlocal score
+            lowered = value.lower()
+            for term in terms:
+                if term in lowered:
+                    score += _SEARCH_FIELD_WEIGHTS[field_name]
+                    matched_fields.append(field_name)
+                    break
+
+        def _match_list(field_name: str, values: list[str]) -> None:
+            nonlocal score
+            for value in values:
+                lowered = value.lower()
+                for term in terms:
+                    if term in lowered:
+                        score += _SEARCH_FIELD_WEIGHTS[field_name]
+                        matched_fields.append(f"{field_name}:{value}")
+                        break
+
+        _match_scalar("name", info.name)
+        _match_scalar("summary", applicability.summary)
+        _match_list("domains", applicability.domains)
+        _match_list("languages", applicability.languages)
+        _match_list("frameworks", applicability.frameworks)
+        _match_list("contexts", applicability.contexts)
+        _match_list("optional_signals", applicability.optional_signals)
+
+        try:
+            resolved_version, primary_index_path, binding_contribs = (
+                _resolve_merged_kit(info.name, subject=subject)
+            )
+        except (KitNotFoundError, KitVersionNotFoundError):
+            continue
+        primary_index = _load_kit_index(primary_index_path, info.name)
+        primary_instr_dir = primary_index_path.parent
+        binding_ids = {s.id for s, _ in binding_contribs}
+        merged: list[tuple[KitSection, Path]] = list(binding_contribs)
+        for s in primary_index.sections:
+            if s.id not in binding_ids:
+                merged.append((s, primary_instr_dir))
+
+        section_hits: list[dict[str, Any]] = []
+        for section, instr_dir in merged:
+            body = (instr_dir / section.file).read_text(encoding="utf-8")
+            body_lower = body.lower()
+            title_lower = section.title.lower()
+            gloss_lower = section.gloss.lower()
+            sec_score = 0.0
+            snippet: str | None = None
+            for term in terms:
+                if term in title_lower:
+                    sec_score += _SEARCH_SECTION_TITLE_WEIGHT
+                if term in gloss_lower:
+                    sec_score += _SEARCH_SECTION_GLOSS_WEIGHT
+                count = body_lower.count(term)
+                if count:
+                    sec_score += _SEARCH_SECTION_BODY_WEIGHT * count
+                    if snippet is None:
+                        snippet = _search_snippet(body, term)
+            if sec_score > 0:
+                section_hits.append({
+                    "id": section.id,
+                    "title": section.title,
+                    "snippet": snippet or "",
+                    "score": sec_score,
+                })
+                score += sec_score
+
+        if score <= 0:
+            continue
+        section_hits.sort(key=lambda s: s["score"], reverse=True)
+        results.append({
+            "name": info.name,
+            "version": resolved_version,
+            "score": score,
+            "summary": applicability.summary,
+            "matched_fields": matched_fields[:_SEARCH_MAX_MATCHED_FIELDS],
+            "sections": section_hits[:_SEARCH_MAX_SECTIONS_PER_KIT],
+        })
+
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return {"query": query, "results": results[:limit]}
+
+
 def compare_kit_versions(
     name: str,
     from_version: str,

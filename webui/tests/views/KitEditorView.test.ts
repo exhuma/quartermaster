@@ -73,10 +73,27 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: { template: '<div />' } },
     { path: '/kit/:name', name: 'kit-detail', component: { template: '<div />' } },
+    {
+      path: '/kit/:name/:version',
+      name: 'kit-edit',
+      component: { template: '<div />' },
+    },
   ],
 })
 
-async function mountView() {
+// A second section so tests can assert which one ends up selected.
+getOutline.mockImplementation(async () => ({
+  name: 'demo',
+  version: 'v1',
+  summary: 'Demo',
+  sections: [
+    { id: 'invariant', title: 'Core', gloss: 'g', always_load: true, bytes: 9 },
+    { id: 'tooling', title: 'Tooling', gloss: 'g', always_load: false, bytes: 9 },
+  ],
+}))
+
+async function mountView(query?: Record<string, string>) {
+  await router.push({ name: 'kit-edit', params: { name: 'demo', version: 'v1' }, query })
   const wrapper = mount(KitEditorView, {
     props: { name: 'demo', version: 'v1' },
     global: { plugins: [vuetify, router] },
@@ -122,6 +139,26 @@ describe('KitEditorView', () => {
     expect(buttonByText(wrapper, 'Add section')).toBeUndefined()
     // Still shows the rendered content.
     expect(wrapper.find('.markdown-body').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('selects the section named in ?section= (a search-result deep link)', async () => {
+    editableRef.value = true
+    isEditorRef.value = true
+    const wrapper = await mountView({ section: 'tooling' })
+
+    const active = wrapper.find('.v-list-item--active')
+    expect(active.text()).toContain('tooling')
+    wrapper.unmount()
+  })
+
+  it('falls back to the first section when ?section= is unknown', async () => {
+    editableRef.value = true
+    isEditorRef.value = true
+    const wrapper = await mountView({ section: 'does-not-exist' })
+
+    const active = wrapper.find('.v-list-item--active')
+    expect(active.text()).toContain('invariant')
     wrapper.unmount()
   })
 })

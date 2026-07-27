@@ -77,6 +77,7 @@ from app.kits import (
     read_kit,
     read_kit_outline,
     resolve_effective_version,
+    search_catalog,
     select_kits_v2,
 )
 from app.kits import (
@@ -121,6 +122,9 @@ from app.routers import (
 )
 from app.routers import (
     roles as roles_router,
+)
+from app.routers import (
+    search as search_router,
 )
 from app.sampling import (
     SamplingTraitEngine,
@@ -225,6 +229,24 @@ def list_kits() -> list[dict]:
     :returns: List of compact kit metadata entries.
     """
     return list_catalog_v2()
+
+
+@mcp.tool
+def search_kit_content(query: str, limit: int = 8) -> dict:
+    """
+    Free-text search across kit metadata and instruction content.
+
+    Complements ``select_kits``/``resolve_kits`` (trait-based) for
+    literal-phrase lookups — e.g. finding which kit documents a specific
+    config key, error message, or code pattern. Searches kit name,
+    summary, applicability fields, and every section's title/gloss/body.
+
+    :param query: Free-text search phrase.
+    :param limit: Maximum number of matching kits to return.
+    :returns: Ranked kits with matched applicability fields and matched
+        section snippets.
+    """
+    return search_catalog(query, limit=limit)
 
 
 @mcp.tool
@@ -1415,6 +1437,7 @@ def create_app() -> FastAPI:
     application.include_router(me_router.router)
     application.include_router(roles_router.router)
     application.include_router(private_kits_router.router)
+    application.include_router(search_router.router)
 
     # Dev-only auth bypass: the token-minting router is imported and mounted
     # ONLY when explicitly enabled, so /auth/dev/* is a plain 404 in
