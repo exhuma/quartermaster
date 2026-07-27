@@ -13,6 +13,12 @@ When quartermaster is available, treat its published trait vocabulary and
 bootstrap guidance as the source of truth for kit discovery; normalize user
 intent to supported traits before selection and retry when coverage is low.
 
+Any code change must call `resolve_kits` with a task description specific
+to *that* change, not just once for the overall task — both while planning
+and again during implementation if a change's shape shifts. A single
+resolve at the start of a session does not cover unrelated changes made
+later in the same session.
+
 ## What this repository is
 
 This repository is **Quartermaster** — a self-hosted **MCP server** (FastAPI + FastMCP) plus its Vue/Vuetify web UI. It exposes **AI instruction kits** over an authenticated HTTP endpoint, so agents load kits on demand without the kit files ever being copied into a target project repo.
