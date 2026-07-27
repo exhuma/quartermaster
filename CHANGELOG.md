@@ -43,6 +43,12 @@ default response drops diagnostic-only
   A per-session ledger omits `always_load` sections already inlined earlier in the same session (listed under a new self-healing `already_delivered` field with a `get_kit` re-fetch note), and the default response drops fields redundant with the opt-in `include_diagnostics` block. Dedup savings are visible as a "Suppressed" series/KPI in the web UI Metrics view.
 
 
+### Fixed
+- [UI] 30-day metrics window now shows real data *@ 2026.7.27b2*
+
+  The Metrics dashboard's 30d option silently returned the same data as 7d because the local metrics store's retention default (7 days) capped every request past that window. Retention now defaults to 30 days, and the picker greys out any window option that exceeds the server's actual configured retention (with an explanatory tooltip) so a lower operator-set retention can't reproduce the same silently-dead button.
+
+
 ## Release 2026.7.14 (2026-07-14)
 
 Quartermaster can now run fully without authentication for trusted
