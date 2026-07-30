@@ -29,7 +29,11 @@ This repository is **Quartermaster** — a self-hosted **MCP server** (FastAPI +
 
 ## Server commands
 
-All commands run from `server/`. The project uses `uv`.
+All commands run from `server/`. The project uses `uv` — all Python
+dependencies live in `server/.venv`, not system/user site-packages. If a
+package can't be found via `uv run ...`, that's a real problem to
+investigate (e.g. missing `uv sync`, wrong working directory), not a signal
+to fall back to a system Python or search for the package elsewhere.
 
 ```bash
 cd server
