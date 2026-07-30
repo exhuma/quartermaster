@@ -9,6 +9,15 @@ exactly as before — it is treated internally as one layer named `default`,
 and every URL (`/api/kits/...`, `/dav/...`) is unchanged. Read on only if you
 want to opt into multiple layers.
 
+:::{note}
+The layering mechanism described here is shared with the **prompts
+catalog** — see [The prompts catalog](../../user/prompts-catalog.md) for its
+layering config (`QM_PROMPT_LAYERS_FILE`). Two things differ there: prompts
+have no binding-sections concept (a prompt has no sections to bind), and —
+unlike kits — a prompts deployment with zero configured layers is a valid,
+supported state.
+:::
+
 ---
 
 ## 1. What changed

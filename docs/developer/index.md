@@ -12,9 +12,11 @@ Working on the Quartermaster server and web UI.
   authorization/roles and layered kit catalogs.
 - **[Python API reference](api/index.md)** — autodoc for the backend modules.
 
-Authoring and evaluating the kits Quartermaster serves are user tasks, not
-server-development ones — see [Authoring kits](../user/authoring-kits.md) and
-[Evaluating kits](../user/evaluating-kits.md).
+Authoring and evaluating the kits Quartermaster serves — and authoring the
+separate prompts catalog — are user tasks, not server-development ones; see
+[Authoring kits](../user/authoring-kits.md),
+[Evaluating kits](../user/evaluating-kits.md), and
+[The prompts catalog](../user/prompts-catalog.md).
 
 ```{toctree}
 :hidden:

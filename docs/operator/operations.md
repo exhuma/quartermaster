@@ -130,6 +130,8 @@ persist; `/data` itself must be writable by uid 1001.
 | Container path | What it is | Persist? | Default |
 |---|---|---|---|
 | `/data/kits` | **The kit catalog.** Bind-mount your own (possibly private) catalog checkout here. Writes via the `/dav` WebDAV endpoint land here and are visible to the MCP immediately — no restart. | **Required** | `QM_KITS_ROOT=/data/kits` |
+| `/data/prompts` | Optional shared prompts catalog (see §3a). Unlike `/data/kits`, nothing needs to be mounted here at all — omitting it just means there is no shared/team prompt library, not a broken deployment. | Optional | `QM_PROMPTS_ROOT` unset |
+| `/data/private-prompts` | Per-owner private prompt overlay (used even when no shared prompts catalog is mounted). Recommended once users start authoring personal prompts, so they persist across upgrades. | Recommended | `QM_PRIVATE_PROMPTS_ROOT=server/var/private-prompts` (dev); point at a writable `/data` path in production |
 | `/data/client_registry.json` | Registered non-browser client User-Agents. | Recommended | `QM_CLIENT_REGISTRY_PATH` |
 | `/data/app_tokens.json` | Hashed WebDAV app tokens. | Recommended (if you use `/dav`) | `QM_APP_TOKENS_PATH` |
 | `/data/logging.toml` | Optional `dictConfig` logging file, if you set `QM_LOG_CONFIG`. | Optional | unset |
@@ -155,6 +157,25 @@ intentional, so your catalog is managed separately from generated state.
 Ensure both are writable by uid 1001 (`chown -R 1001:1001 /srv/kit-catalog`
 for the bind mount).
 :::
+
+### 3a. The prompts catalog (optional)
+
+Unlike the kit catalog, **no prompt source is required at all.** Leave both
+`QM_PROMPTS_ROOT` and `QM_PROMPT_LAYERS_FILE` unset and the instance still
+serves each user's private-overlay prompts (`/data/private-prompts` above) —
+only configure a shared root or layers file if you want a team-wide prompt
+library.
+
+| Variable | Purpose |
+|---|---|
+| `QM_PROMPTS_ROOT` | Single shared prompts root, mirrors `QM_KITS_ROOT`. |
+| `QM_PROMPT_LAYERS_FILE` | TOML file of ordered named prompt layers, same `[[layer]]` shape as `QM_KIT_LAYERS_FILE` — see [Layered kit catalogs](../developer/migrations/kit-layers.md) for the format. Takes precedence over `QM_PROMPTS_ROOT` when both are set. |
+| `QM_PRIVATE_PROMPTS_ROOT` | Per-owner private prompt overlay (see the mounts table above). |
+
+When `QM_PROMPT_LAYERS_FILE` is set, at least one layer must still be
+writable (same startup rule as kits) — but this requirement does **not**
+apply when it is left unset, since the zero-layer state is itself valid for
+prompts.
 
 ---
 

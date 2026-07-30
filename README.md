@@ -88,6 +88,22 @@ transport) and exposes these kit tools (plus the trait-selection tools
 | `list_kit_versions(name)` | Returns the sorted list of available major versions for a single kit. |
 | `compare_kit_versions(name, from_version, to_version)` | Summarises changelog entries between two versions and warns when any change would affect end-users. |
 
+It also exposes prompt-catalog tools, for reusable agent instructions your
+team maintains (distinct from the trait-selection tools above and from the
+static `list_prompts`/`get_prompt` canned templates):
+
+| Tool | Description |
+|---|---|
+| `list_catalog_prompts()` | Lists catalog prompts visible to the caller (merged shared + private). |
+| `get_catalog_prompt(name)` | Returns one prompt's rendered Markdown body. |
+| `create_catalog_prompt(name, body, title="", description="")` | Creates a prompt in the caller's private overlay. |
+| `update_catalog_prompt(name, body, title="", description="")` | Replaces a prompt in the caller's private overlay. |
+| `delete_catalog_prompt(name)` | Deletes a prompt from the caller's private overlay. |
+
+Writes from these five tools are always scoped to the caller's private
+overlay; author shared/team prompts via `/api/prompts` or WebDAV instead —
+see [The prompts catalog](docs/user/prompts-catalog.md).
+
 Every request to the MCP endpoint must be authenticated.  By default this
 means `Authorization: Bearer <token>` with a valid Keycloak-issued JWT.
 Optionally, fixed headers (`X-Client-Id` + `X-Client-Secret`) can be
@@ -549,6 +565,9 @@ to `.env`, but the table below is the authoritative reference.
 | `QM_RESOURCE_BASE_URL` | Yes | Public origin (scheme + host) as reached by the browser; drives OAuth metadata and the SPA redirect URIs. Required even in auth-less mode. | — |
 | `QM_KEYCLOAK_AUDIENCE` | No | Expected `aud` claim; unset skips audience validation. | unset (no audience check) |
 | `QM_KITS_ROOT` | No* | Kit catalog directory. Required at runtime (the catalog is external). | `/data/kits` (Docker image) |
+| `QM_PROMPTS_ROOT` | No | Single-root prompts catalog directory, mirrors `QM_KITS_ROOT` for the separate prompts catalog. Unlike kits, no root is required at all — omitting it (and `QM_PROMPT_LAYERS_FILE`) is valid; private-overlay prompts still work. | unset |
+| `QM_PROMPT_LAYERS_FILE` | No | TOML file of ordered named prompt layers, same shape as `QM_KIT_LAYERS_FILE`. Takes precedence over `QM_PROMPTS_ROOT` when both are set. | unset |
+| `QM_PRIVATE_PROMPTS_ROOT` | No | Per-owner private prompt overlay root, mirrors `QM_PRIVATE_KITS_ROOT`. Point at a writable data volume in production. | `server/var/private-prompts` |
 | `QM_CLIENT_REGISTRY_PATH` | No | Registered-client state file. | `/data/client_registry.json` (Docker image) |
 | `QM_APP_TOKENS_PATH` | No | Hashed WebDAV app-token store. | `/data/app_tokens.json` (Docker image) |
 | `QM_DAV_REQUIRE_TLS` | No | Refuse WebDAV Basic credentials over plain HTTP. | `true` |
@@ -627,6 +646,33 @@ versions and whether the change affects end-users.
 
 For the full kit structure, metadata schema, and versioning rules, see
 [`AUTHORING_KITS.md`](docs/user/authoring-kits.md).
+
+---
+
+## The prompts catalog
+
+Quartermaster also serves a catalog of **reusable prompts** — single
+Markdown files of agent instruction text, distinct from the server's
+built-in canned prompts (`trait_selection_bootstrap`, `greet`,
+`integrate_project`, fetched via `list_prompts`/`get_prompt`). Catalog
+prompts are user/team-authored content, analogous to kits but simpler: no
+versions, no sections.
+
+Unlike the kit catalog, **no shared root is required** — every user's
+private-overlay prompts (`QM_PRIVATE_PROMPTS_ROOT`) work even with nothing
+configured. To add a shared/team catalog, set `QM_PROMPTS_ROOT` (single
+root) or `QM_PROMPT_LAYERS_FILE` (multiple named layers, same TOML shape as
+kit layers).
+
+Author prompts three ways: directly in the catalog directory, over the
+`/api/prompts` REST API (editor-role-gated for the shared catalog), over
+WebDAV, or — for your own private prompts only — via the
+`create_catalog_prompt`/`update_catalog_prompt`/`delete_catalog_prompt` MCP
+tools (always scoped to your private overlay, never the shared catalog).
+
+For the full picture — the file format, the MCP tools, and how catalog
+prompts differ from canned prompts — see
+[The prompts catalog](docs/user/prompts-catalog.md).
 
 ---
 

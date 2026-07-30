@@ -23,6 +23,14 @@ bypassing score-based ranking and truncation entirely.
 
   A kit's `applicability.json` can set `always_select: true` so it is appended to every `select_kits`/`resolve_kits` result once eligible, instead of competing on trait-match score — fixing tech-agnostic kits (design principles, code style, testing strategy, etc.) that could never earn enough score to survive ranking alongside implementation-specific kits.
 
+- ☆ **[MCP] Layered personal prompts catalog** *@ 2026.7.30b1*
+
+  A second catalog type, sibling to kits: single-file Markdown prompts (optional title/description, no versions or sections) with full operator layering and a private per-owner overlay, so a user's own reusable prompts are available across every project without copy-pasting. New MCP tools `list_catalog_prompts`/`get_catalog_prompt`/`create_catalog_prompt`/`update_catalog_prompt`/`delete_catalog_prompt` (private-overlay-only writes), plus a native, user-invoked MCP prompt for every catalog entry. Unlike kits, no shared root is required at all — a deployment with nothing configured still serves each user's private prompts. Distinct from, and untouched by, the existing static `list_prompts`/`get_prompt` canned templates.
+
+- [API] REST triad for the prompts catalog *@ 2026.7.30b1*
+
+  `/api/prompts` (merged view, editor-gated writes), `/api/prompts/layers` (per-layer CRUD), and `/api/private-prompts` (ownership-gated, any authenticated user manages their own) mirror the kit-catalog REST surface for the new prompts catalog.
+
 
 ## Release 2026.7.27 (2026-07-27)
 

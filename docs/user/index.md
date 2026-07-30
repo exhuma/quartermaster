@@ -30,16 +30,22 @@ loads the right kits on its own.
   remember which kit version a repository follows.
 - **[See what Quartermaster did](diagnostics.md)** — inspect which kits and
   traits a task resolved to, and the per-user memory it keeps for you.
+- **[The prompts catalog](prompts-catalog.md)** — invoke reusable prompts your
+  team maintains, straight from your agent.
 
-## Kit authors
+## Kit and prompt authors
 
-You create, edit, and curate the kits Quartermaster serves.
+You create, edit, and curate the kits and reusable prompts Quartermaster
+serves.
 
 - **[Authoring kits](authoring-kits.md)** — how a kit is structured, and how to
   write one against a running instance.
 - **[Evaluating kits](evaluating-kits.md)** — measure how well a catalog
   resolves: coverage, false-exclusions, cross-kit interference, and the impact
   of a change.
+- **[The prompts catalog](prompts-catalog.md)** — author reusable agent
+  instructions Quartermaster serves, and how they differ from the server's
+  built-in canned prompts.
 
 ```{toctree}
 :hidden:
@@ -51,4 +57,5 @@ quartermaster-toml
 diagnostics
 authoring-kits
 evaluating-kits
+prompts-catalog
 ```
