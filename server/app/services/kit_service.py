@@ -26,6 +26,10 @@ from pathlib import Path
 from typing import Any
 
 from app import kits as kits_mod
+from app.catalog.errors import (
+    CatalogLayerNotFoundError,
+    CatalogLayerReadonlyError,
+)
 from app.kits import (
     KitConflictError,
     KitLayerNotFoundError,
@@ -33,6 +37,7 @@ from app.kits import (
     KitNotFoundError,
     KitValidationError,
 )
+from app.services import catalog_service as catalog_svc
 from app.storage import kit_writes as writes
 
 __all__ = [
@@ -77,14 +82,14 @@ def _kits_write_root() -> Path:
     """Return the default writable layer root (last non-readonly layer)."""
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
-    for layer in reversed(layers):
-        if not layer.rest_readonly:
-            return layer.path
-    raise RuntimeError(
-        "No writable kit layer configured. "
-        "Set QM_KITS_ROOT or configure at least one non-readonly layer "
-        "in QM_KIT_LAYERS_FILE."
-    )
+    try:
+        return catalog_svc.default_write_root(layers)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "No writable kit layer configured. "
+            "Set QM_KITS_ROOT or configure at least one non-readonly layer "
+            "in QM_KIT_LAYERS_FILE."
+        ) from exc
 
 
 def _layer_path(layer_id: str) -> Path:
@@ -96,10 +101,10 @@ def _layer_path(layer_id: str) -> Path:
     """
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
-    for layer in layers:
-        if layer.name == layer_id:
-            return layer.path
-    raise KitLayerNotFoundError(layer_id)
+    try:
+        return catalog_svc.layer_path(layers, layer_id)
+    except CatalogLayerNotFoundError as exc:
+        raise KitLayerNotFoundError(layer_id) from exc
 
 
 def _layer_write_path(layer_id: str) -> Path:
@@ -112,12 +117,12 @@ def _layer_write_path(layer_id: str) -> Path:
     """
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
-    for layer in layers:
-        if layer.name == layer_id:
-            if layer.rest_readonly:
-                raise KitLayerReadonlyError(layer_id)
-            return layer.path
-    raise KitLayerNotFoundError(layer_id)
+    try:
+        return catalog_svc.layer_write_path(layers, layer_id)
+    except CatalogLayerReadonlyError as exc:
+        raise KitLayerReadonlyError(layer_id) from exc
+    except CatalogLayerNotFoundError as exc:
+        raise KitLayerNotFoundError(layer_id) from exc
 
 
 def _toml_basic_string(value: str) -> str:
@@ -222,13 +227,9 @@ def _layer_rest_editable(source_layer: str | None) -> bool:
     :param source_layer: Owning layer name, or ``None``.
     :returns: ``True`` when REST writes to the layer are allowed.
     """
-    if not source_layer:
-        return True
     settings = kits_mod.get_settings()
-    for layer in kits_mod._get_effective_layers(settings):
-        if layer.name == source_layer:
-            return not layer.rest_readonly
-    return True
+    layers = kits_mod._get_effective_layers(settings)
+    return catalog_svc.layer_rest_editable(layers, source_layer)
 
 
 def list_kits() -> list[dict[str, Any]]:
@@ -262,11 +263,10 @@ def _require_kit(name: str, root: Path | None = None) -> None:
     catalog across all configured layers.
     """
     if root is not None:
-        if name not in kits_mod._kit_version_paths(root):
-            raise KitNotFoundError(name)
+        exists = name in kits_mod._kit_version_paths(root)
     else:
-        if not any(k.name == name for k in kits_mod.list_all_kits()):
-            raise KitNotFoundError(name)
+        exists = any(k.name == name for k in kits_mod.list_all_kits())
+    catalog_svc.require_exists(name, exists, not_found=KitNotFoundError)
 
 
 def list_layers() -> list[dict[str, Any]]:
@@ -278,16 +278,7 @@ def list_layers() -> list[dict[str, Any]]:
     """
     settings = kits_mod.get_settings()
     layers = kits_mod._get_effective_layers(settings)
-    return [
-        {
-            "name": layer.name,
-            "path": str(layer.path),
-            "readonly": layer.readonly,
-            "rest_readonly": layer.rest_readonly,
-            "webdav_readonly": layer.webdav_readonly,
-        }
-        for layer in layers
-    ]
+    return catalog_svc.list_layers(layers)
 
 
 def get_kit_detail(name: str, root: Path | None = None) -> dict[str, Any]:

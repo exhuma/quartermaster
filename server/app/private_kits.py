@@ -13,20 +13,19 @@ itself: Keycloak ``sub``s are UUIDs (safe) but Copilot client-ids and legacy
 usernames may not be, so hashing sidesteps every path-escape question and keeps
 the raw subject off disk. Reads/writes still pass through
 :func:`~app.storage.kit_writes.resolve_within` for defence in depth.
+
+This module is a thin, kit-specific binding over the generic private-overlay
+machinery in :mod:`app.catalog.private_overlay`, fixed to
+``get_settings().private_kits_root`` as the base root.
 """
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
+from app.catalog.private_overlay import owned_private_roots as _owned_roots
+from app.catalog.private_overlay import private_root_for as _private_root_for
 from app.config import get_settings
-from app.storage.kit_writes import resolve_within
-
-
-def _owner_dirname(sub: str) -> str:
-    """Return the filesystem-safe directory name for owner *sub*."""
-    return hashlib.sha256(sub.encode("utf-8")).hexdigest()[:16]
 
 
 def private_root_for(sub: str) -> Path:
@@ -38,10 +37,8 @@ def private_root_for(sub: str) -> Path:
         (confined within ``private_kits_root``; may not yet exist).
     :raises ValueError: If *sub* is empty.
     """
-    if not sub:
-        raise ValueError("A subject is required for a private-kit root.")
     base = get_settings().private_kits_root
-    return resolve_within(Path(base), _owner_dirname(sub))
+    return _private_root_for(Path(base), sub)
 
 
 def owned_private_roots(sub: str | None) -> list[Path]:
@@ -53,5 +50,5 @@ def owned_private_roots(sub: str | None) -> list[Path]:
     """
     if not sub:
         return []
-    root = private_root_for(sub)
-    return [root] if root.is_dir() else []
+    base = get_settings().private_kits_root
+    return _owned_roots(Path(base), sub)

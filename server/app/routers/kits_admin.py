@@ -15,73 +15,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Response, status
-from pydantic import BaseModel
+from fastapi import Depends, Query, Response, status
 
 from app import kits as kits_mod
 from app.authz import require_editor
-from app.media_types import VendorJSONResponse, require_vendor_accept
+from app.catalog.router_base import new_api_router
+from app.routers.kit_schemas import KitCreate, SectionUpsert, VersionCreate
+from app.routers.kit_schemas import section_inputs as _inputs
 from app.services import kit_service as svc
 
-router = APIRouter(
-    prefix="/api",
-    tags=["kits"],
-    default_response_class=VendorJSONResponse,
-    dependencies=[Depends(require_vendor_accept)],
-    responses={406: {"description": "Vendor media type not requested."}},
-)
-
-
-class SectionBody(BaseModel):
-    """A section with its file basename, metadata, and body."""
-
-    file: str
-    title: str
-    gloss: str = ""
-    always_load: bool = False
-    body: str
-
-
-class KitCreate(BaseModel):
-    """Request body to create a kit with its initial version."""
-
-    name: str
-    applicability: dict[str, Any]
-    summary: str
-    sections: list[SectionBody]
-    changelog: str | None = None
-    version: str = "v1"
-
-
-class VersionCreate(BaseModel):
-    """Request body to add a new major version to a kit."""
-
-    version: str
-    summary: str
-    sections: list[SectionBody]
-
-
-class SectionUpsert(BaseModel):
-    """Request body to create or replace a single section."""
-
-    title: str
-    gloss: str = ""
-    always_load: bool = False
-    body: str
-
-
-def _inputs(sections: list[SectionBody]) -> list[svc.SectionInput]:
-    """Convert request section models to service inputs."""
-    return [
-        svc.SectionInput(
-            file=s.file,
-            title=s.title,
-            gloss=s.gloss,
-            always_load=s.always_load,
-            body=s.body,
-        )
-        for s in sections
-    ]
+router = new_api_router(prefix="/api", tags=["kits"])
 
 
 # ---------------------------------------------------------------------------

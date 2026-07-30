@@ -19,14 +19,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.catalog import layering as _layering
+from app.catalog.errors import (
+    CatalogConflictError,
+    CatalogLayerNotFoundError,
+    CatalogLayerReadonlyError,
+    CatalogNotFoundError,
+    CatalogValidationError,
+    CatalogVersionNotFoundError,
+)
+from app.catalog.merge import scan_layers_merged
 from app.config import KitLayerConfig, get_settings
-from app.identity import current_sub
 from app.private_kits import owned_private_roots
 
 logger = logging.getLogger(__name__)
 
 
-class KitNotFoundError(Exception):
+class KitNotFoundError(CatalogNotFoundError):
     """
     Raised when a requested kit name does not match any known kit.
 
@@ -43,7 +52,7 @@ class KitNotFoundError(Exception):
         self.name = name
 
 
-class KitVersionNotFoundError(Exception):
+class KitVersionNotFoundError(CatalogVersionNotFoundError):
     """
     Raised when a requested version does not exist for a kit.
 
@@ -65,7 +74,7 @@ class KitVersionNotFoundError(Exception):
         self.version = version
 
 
-class KitSectionNotFoundError(Exception):
+class KitSectionNotFoundError(CatalogNotFoundError):
     """
     Raised when a requested section id does not exist in a kit index.
 
@@ -93,7 +102,7 @@ class KitSectionNotFoundError(Exception):
         self.valid = valid
 
 
-class KitConflictError(Exception):
+class KitConflictError(CatalogConflictError):
     """
     Raised when a write would collide with existing content.
 
@@ -112,7 +121,7 @@ class KitConflictError(Exception):
         super().__init__(message)
 
 
-class KitValidationError(Exception):
+class KitValidationError(CatalogValidationError):
     """
     Raised when a proposed write would produce invalid kit content.
 
@@ -131,7 +140,7 @@ class KitValidationError(Exception):
         super().__init__(message)
 
 
-class KitLayerNotFoundError(Exception):
+class KitLayerNotFoundError(CatalogLayerNotFoundError):
     """
     Raised when a requested layer identifier is not configured.
 
@@ -143,7 +152,7 @@ class KitLayerNotFoundError(Exception):
         self.layer_name = layer_name
 
 
-class KitLayerReadonlyError(Exception):
+class KitLayerReadonlyError(CatalogLayerReadonlyError):
     """
     Raised when a write is attempted on a read-only layer.
 
@@ -617,52 +626,30 @@ def _get_effective_layers(settings: Any) -> list[KitLayerConfig]:
     raise ValueError("Settings object has no kit root configured")
 
 
-# The synthetic layer name for a caller's private-kit overlay. One private
-# layer at most per caller, placed at highest priority so a private kit shadows
-# a public kit of the same name FOR THE OWNER ONLY.
-_PRIVATE_LAYER_NAME = "__private__"
-
-# Sentinel distinguishing "resolve the subject from the identity contextvar"
-# (the default for owner-aware reads) from an explicit ``None`` meaning
-# "public catalog only, ignore any caller in context" (used by the vocabulary
-# / embedding-cache path so private kits never poison the shared cache).
-_CTX_SUBJECT: Any = object()
-
-
-def _resolve_subject(subject: Any) -> str | None:
-    """Resolve a subject argument to a concrete subject or ``None``.
-
-    :param subject: ``_CTX_SUBJECT`` → read the identity contextvar; otherwise
-        a ``str`` subject or ``None`` (public) passed straight through.
-    """
-    if subject is _CTX_SUBJECT:
-        return current_sub()
-    return subject
+# Kit-specific aliases over the generic layering primitives in
+# app.catalog.layering, kept under their original private names so every
+# existing call site in this module is unaffected.
+_PRIVATE_LAYER_NAME = _layering.PRIVATE_LAYER_NAME
+_CTX_SUBJECT: Any = _layering.CTX_SUBJECT
+_resolve_subject = _layering.resolve_subject
 
 
 def _caller_layers(subject: Any = _CTX_SUBJECT) -> list[KitLayerConfig]:
     """Return the effective layers for a caller, private overlay last.
 
-    The public layers are always present; when the caller (from *subject* or
-    the identity contextvar) has an existing private catalog, it is appended as
-    the highest-priority layer. A caller with no private kits — or no
-    identity — sees exactly the public catalog, so this is a no-op on the hot
-    public path and default-deny for private content.
+    Thin kit-specific binding over :func:`app.catalog.layering.caller_layers`:
+    supplies this catalog's configured public layers and
+    :func:`app.private_kits.owned_private_roots` as the private-root lookup.
 
     :param subject: ``_CTX_SUBJECT`` (contextvar), a ``str`` subject, or
         ``None`` to force public-only.
     :returns: Ordered layers, base → overlay, private overlay last if any.
     """
     settings = get_settings()
-    layers = list(_get_effective_layers(settings))
-    sub = _resolve_subject(subject)
-    for root in owned_private_roots(sub):
-        layers.append(
-            KitLayerConfig(
-                name=_PRIVATE_LAYER_NAME, path=root, readonly=False
-            )
-        )
-    return layers
+    base_layers = list(_get_effective_layers(settings))
+    return _layering.caller_layers(
+        base_layers, owned_private_roots, subject=subject
+    )
 
 
 def _kit_version_paths_layered(
@@ -675,27 +662,25 @@ def _kit_version_paths_layered(
     kit name appears in multiple layers, the highest-priority layer that
     contains it owns **all** its versions (kit-level shadowing).
 
+    Thin reshape over :func:`app.catalog.merge.scan_layers_merged`: the
+    generic merge is oblivious to what a kit's per-name "entries" are, so
+    this function just distributes the winning layer's root/name across
+    every version of the winning kit's already-version-sorted entries (see
+    :func:`_kit_version_paths`).
+
     :param layers: Ordered list of layers, base (index 0) → overlay
         (last).
     :returns: Mapping of kit name → ``{version: (index_path,
         layer_root, layer_name)}``, versions sorted oldest → newest.
     """
-    merged: dict[str, tuple[dict[str, Path], Path, str]] = {}
-    for layer in layers:
-        layer_paths = _kit_version_paths(layer.path)
-        for kit_name, versions in layer_paths.items():
-            merged[kit_name] = (versions, layer.path, layer.name)
-
-    result: dict[str, dict[str, tuple[Path, Path, str]]] = {}
-    for kit_name in sorted(merged.keys()):
-        versions, layer_root, layer_name = merged[kit_name]
-        result[kit_name] = {
+    merged = scan_layers_merged(layers, _kit_version_paths)
+    return {
+        kit_name: {
             version: (index_path, layer_root, layer_name)
-            for version, index_path in sorted(
-                versions.items(), key=lambda kv: _version_key(kv[0])
-            )
+            for version, index_path in versions.items()
         }
-    return result
+        for kit_name, (versions, layer_root, layer_name) in merged.items()
+    }
 
 
 def _resolve_kit_root(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from app.catalog.errors import CatalogAccessError
 from app.config import get_settings
 from app.storage import role_store
 
@@ -18,7 +19,7 @@ class EditorRequiredError(Exception):
     """Raised when a mutation needs the ``editor`` role the caller lacks."""
 
 
-class PrivateKitAccessError(Exception):
+class PrivateKitAccessError(CatalogAccessError):
     """Raised when a caller references a private kit they do not own.
 
     Mapped to **404** (not 403) so the server never confirms that another
