@@ -678,7 +678,10 @@ def select_kits(
     :param capabilities: Capability hints, e.g. ``["auth"]``.
     :param contexts: Context hints, e.g. ``["docs"]``.
     :param broaden: Lower selection threshold for recall recovery.
-    :param limit: Maximum candidates to return (bounded internally).
+    :param limit: Maximum score-ranked candidates to return (bounded
+        internally). Kits marked ``always_select`` in their manifest are
+        appended after this cut when eligible, so the result may contain
+        more than *limit* candidates.
     :returns: Candidate list plus confidence and coverage diagnostics. The
         ``warnings`` field lists any kits whose applicability manifest could
         not be loaded (and were therefore skipped during ranking).
@@ -973,7 +976,10 @@ async def resolve_kits(
 
     :param task: Natural-language description of the work to be done.
     :param broaden: Lower the selection threshold to widen recall.
-    :param limit: Maximum number of candidate kits to return.
+    :param limit: Maximum number of score-ranked candidate kits to return.
+        Kits marked ``always_select`` in their manifest are appended after
+        this cut when eligible, so the response may contain more than
+        *limit* kits.
     :param max_sections_per_kit: Cap on non-``always_load`` sections offered
         per kit for on-demand fetching.
     :param include_diagnostics: When true, attach a ``_diagnostics`` block

@@ -25,6 +25,7 @@ from app.kits import (
     _load_kit_index,
     _parse_changelog,
     _parse_version_tuple,
+    _validate_manifest,
     _version_key,
     compare_kit_versions,
     resolve_effective_version,
@@ -178,6 +179,62 @@ def kit_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return tmp_path
+
+
+@pytest.fixture()
+def kit_root_with_always_select(kit_root: Path) -> Path:
+    """``kit_root`` plus a tech-agnostic kit-gamma with ``always_select``.
+
+    Mirrors the real catalog's tech-agnostic kits: empty ``requires``,
+    ``languages`` and ``frameworks``, so it can never earn enough
+    trait-match weight to be selected on score alone. ``excludes`` carries
+    one contrived capability so ineligibility can be exercised too.
+    """
+    _write_kit_version(
+        kit_root,
+        "kit-gamma",
+        "v1",
+        summary="Gamma summary.",
+        sections=[
+            {
+                "file": "core-principles.md",
+                "title": "Core principles",
+                "gloss": "Always-applicable design principles",
+                "always_load": True,
+                "body": "## Core principles\n\nMinimize coupling.\n",
+            }
+        ],
+    )
+    (kit_root / "kit-gamma" / "applicability.json").write_text(
+        json.dumps(
+            {
+                "kit_type": "module",
+                "summary": "Tech-agnostic design principles.",
+                "domains": ["design"],
+                "languages": [],
+                "frameworks": [],
+                "contexts": ["backend", "frontend"],
+                "requires": {
+                    "languages": [],
+                    "frameworks": [],
+                    "capabilities": [],
+                    "contexts": [],
+                },
+                "excludes": {
+                    "languages": [],
+                    "frameworks": [],
+                    "capabilities": ["no-design-principles"],
+                    "contexts": [],
+                },
+                "optional_signals": ["clean-code"],
+                "related_kits": [],
+                "priority": 50,
+                "always_select": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return kit_root
 
 
 @pytest.fixture()
@@ -845,6 +902,168 @@ def test_evaluate_candidate_scoring_constants() -> None:
     result = _evaluate_candidate(info, applicability, traits)
     assert result["score"] == 70 + WEIGHT_LANGUAGES + WEIGHT_REQUIRE_SATISFIED
     assert result["ineligible"] is False
+
+
+# ---------------------------------------------------------------------------
+# `always_select` manifest field and selection bypass
+# ---------------------------------------------------------------------------
+
+
+def _base_manifest_dict(**overrides: object) -> dict:
+    """A minimal, valid ``applicability.json`` body for validator tests."""
+    base: dict = {
+        "kit_type": "module",
+        "summary": "A kit.",
+        "domains": [],
+        "languages": [],
+        "frameworks": [],
+        "contexts": [],
+        "requires": {
+            "languages": [],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
+        "excludes": {
+            "languages": [],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
+        "optional_signals": [],
+        "related_kits": [],
+        "priority": 50,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_validate_manifest_always_select_defaults_false() -> None:
+    """A manifest with no ``always_select`` key parses unchanged."""
+    applicability = _validate_manifest(_base_manifest_dict(), "kit-x")
+    assert applicability.always_select is False
+
+
+def test_validate_manifest_always_select_true() -> None:
+    applicability = _validate_manifest(
+        _base_manifest_dict(always_select=True), "kit-x"
+    )
+    assert applicability.always_select is True
+
+
+def test_validate_manifest_rejects_non_bool_always_select() -> None:
+    with pytest.raises(ValueError):
+        _validate_manifest(_base_manifest_dict(always_select="yes"), "kit-x")
+
+
+def test_always_select_kit_appears_beyond_limit(
+    kit_root_with_always_select: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A forced kit is appended after the score-ranked cut, so the
+    response can exceed ``limit``, without displacing the genuinely
+    matched kit."""
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S", (), {"kits_root": kit_root_with_always_select}
+        )(),
+    )
+    result = select_kits_v2(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=["rest-api"],
+        contexts=["backend"],
+        limit=1,
+    )
+    names = [item["name"] for item in result["candidates"]]
+    assert names[0] == "kit-alpha"
+    assert "kit-gamma" in names
+    assert len(names) == 2  # exceeds limit=1
+
+    gamma = next(c for c in result["candidates"] if c["name"] == "kit-gamma")
+    assert "always-select" in gamma["reasons"]
+
+
+def test_always_select_kit_dropped_when_excluded(
+    kit_root_with_always_select: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``excludes`` eligibility gate still applies to a forced kit —
+    ``always_select`` bypasses ranking, not hard constraints."""
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S", (), {"kits_root": kit_root_with_always_select}
+        )(),
+    )
+    result = select_kits_v2(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=["rest-api", "no-design-principles"],
+        contexts=["backend"],
+    )
+    names = [item["name"] for item in result["candidates"]]
+    assert "kit-gamma" not in names
+
+
+def test_always_select_kit_does_not_inflate_coverage(
+    kit_root_with_always_select: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Aggregate diagnostics (coverage/confidence/broadening) reflect only
+    the score-ranked selection, not the appended forced kit — kit-gamma
+    contributes no matched dimensions of its own (empty
+    requires/languages/frameworks), so its presence must not change these
+    values from what kit-alpha alone would produce."""
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S", (), {"kits_root": kit_root_with_always_select}
+        )(),
+    )
+    result = select_kits_v2(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=["rest-api"],
+        contexts=["backend"],
+        limit=1,
+    )
+    # kit-alpha alone matches all four provided dimensions.
+    assert result["coverage"] == 1.0
+    assert result["confidence"] == "high"
+    assert result["broadening_recommended"] is False
+
+
+def test_explain_kit_v2_surfaces_always_select(
+    kit_root_with_always_select: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type(
+            "S", (), {"kits_root": kit_root_with_always_select}
+        )(),
+    )
+    result = explain_kit_v2(name="kit-gamma")
+    assert result["always_select"] is True
+
+
+def test_select_kits_v2_without_always_select_kit_unaffected(
+    kit_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A catalog with no ``always_select`` kit at all is unaffected: no
+    forced-append branch fires, output is identical to before this
+    feature existed."""
+    monkeypatch.setattr(
+        "app.kits.get_settings",
+        lambda: type("S", (), {"kits_root": kit_root})(),
+    )
+    result = select_kits_v2(
+        languages=["python"],
+        frameworks=["fastapi"],
+        capabilities=["rest-api"],
+        contexts=["backend"],
+        limit=1,
+    )
+    names = [item["name"] for item in result["candidates"]]
+    assert names == ["kit-alpha"]
 
 
 # ---------------------------------------------------------------------------

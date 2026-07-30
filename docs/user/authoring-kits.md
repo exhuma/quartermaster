@@ -78,7 +78,7 @@ Optional per-section field:
 ## `applicability.json` — the selector metadata
 
 Drives trait-based ranking (`select_kits`/`explain_kit_candidate`). **All**
-fields below are required:
+fields below are required, except `always_select` which is optional:
 
 ```json
 {
@@ -105,6 +105,20 @@ fields below are required:
 - `priority` — integer base score (higher is preferred).
 - `domains`, `languages`, `frameworks`, `contexts`, `optional_signals`,
   `related_kits` — string lists used for matching/ranking.
+- `always_select` — optional boolean, defaults to `false`. When `true`, the
+  kit bypasses score-based ranking and the `limit` truncation entirely: it is
+  appended to every selection whose traits don't make it ineligible (an
+  unmet `requires` or a matched `excludes` still drops it — this only skips
+  the *score* competition, not the hard constraints).
+
+  Use this only for kits that are genuinely tech-agnostic — no
+  `languages`/`frameworks`, empty `requires` — and therefore structurally
+  incapable of earning enough trait-match weight to rank alongside
+  implementation-specific kits. A kit with real `requires`/`languages`/
+  `frameworks` values should not need this flag; if it isn't being selected,
+  the fix is a better manifest, not a bypass. Setting it on more than a
+  handful of kits reintroduces the context bloat this flag exists to avoid,
+  since every flagged kit's `always_load` content ships on every resolve.
 
 ## Versioning
 

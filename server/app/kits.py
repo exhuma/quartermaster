@@ -251,6 +251,11 @@ class KitApplicability:
     :param optional_signals: Additional weak signals for ranking.
     :param related_kits: Kit names frequently used together.
     :param priority: Base ranking priority (higher means preferred).
+    :param always_select: When true, the kit bypasses score-based ranking
+        and truncation: it is appended to every selection whose traits do
+        not make it ineligible (an unmet ``requires`` or a matched
+        ``excludes``). For kits that are genuinely tech-agnostic and would
+        otherwise never earn enough trait-match weight to be selected.
     """
 
     kit_type: str
@@ -264,6 +269,7 @@ class KitApplicability:
     optional_signals: list[str]
     related_kits: list[str]
     priority: int
+    always_select: bool = False
 
 
 @dataclass(frozen=True)
@@ -470,6 +476,13 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
             f"Manifest field 'priority' for kit {kit_name!r} must be int"
         )
 
+    always_select = raw.get("always_select", False)
+    if not isinstance(always_select, bool):
+        raise ValueError(
+            f"Manifest field 'always_select' for kit {kit_name!r} "
+            f"must be a boolean"
+        )
+
     return KitApplicability(
         kit_type=kit_type,
         summary=summary,
@@ -486,6 +499,7 @@ def _validate_manifest(raw: Any, kit_name: str) -> KitApplicability:
             raw["related_kits"], field_name="related_kits"
         ),
         priority=priority,
+        always_select=always_select,
     )
 
 
@@ -978,6 +992,9 @@ def _evaluate_candidate(
     else:
         confidence = "high" if score >= CANDIDATE_HIGH_SCORE else "medium"
 
+    if applicability.always_select and not ineligible:
+        reasons.append("always-select")
+
     return {
         "name": kit.name,
         "latest_version": kit.latest_version,
@@ -989,6 +1006,7 @@ def _evaluate_candidate(
         "reasons": reasons,
         "summary": applicability.summary,
         "matched_dimensions": sorted(matched_dimensions),
+        "always_select": applicability.always_select,
     }
 
 
@@ -1194,7 +1212,10 @@ def select_kits_v2(
     :param capabilities: Capability hints, e.g. ``["auth", "rest-api"]``.
     :param contexts: Context hints, e.g. ``["docs", "hosting"]``.
     :param broaden: When true, lower the score threshold to widen recall.
-    :param limit: Max number of candidates to return.
+    :param limit: Max number of score-ranked candidates to return. Kits
+        with the manifest's ``always_select`` flag set are appended after
+        this cut when eligible, so the response may contain more than
+        *limit* candidates.
     :returns: Ranked candidates and selection diagnostics.
     """
     traits = _normalize_traits(
@@ -1222,6 +1243,7 @@ def select_kits_v2(
         selected = eligible[:max_items]
 
     selected = selected[:max_items]
+
     provided_dimensions = [
         key
         for key, values in {
@@ -1265,6 +1287,21 @@ def select_kits_v2(
         )
     )
 
+    # ``always_select`` kits bypass score-based ranking and the ``limit``
+    # truncation entirely: append them here, after ``coverage``/
+    # ``confidence``/``broadening_recommended`` are computed from the
+    # genuinely trait-matched selection, so a kit that carries no relevance
+    # signal of its own does not inflate those diagnostics. The
+    # ``excludes``/``requires`` eligibility gate above still applies — this
+    # only skips the *score* competition, not the hard constraints.
+    already_selected = {c["name"] for c in selected}
+    forced = [
+        c
+        for c in eligible
+        if c["always_select"] and c["name"] not in already_selected
+    ]
+    output_candidates = selected + forced
+
     return {
         "candidates": [
             {
@@ -1276,7 +1313,7 @@ def select_kits_v2(
                 "reasons": candidate["reasons"],
                 "summary": candidate["summary"],
             }
-            for candidate in selected
+            for candidate in output_candidates
         ],
         "confidence": confidence,
         "coverage": round(coverage, 3),
@@ -1332,6 +1369,7 @@ def explain_kit_v2(
         "ineligible": evaluation["ineligible"],
         "uncertain": evaluation["uncertain"],
         "reasons": evaluation["reasons"],
+        "always_select": evaluation["always_select"],
     }
 
 

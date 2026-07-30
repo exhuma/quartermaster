@@ -452,7 +452,10 @@ def resolve_kits(
 
     :param task: Natural-language description of the work to be done.
     :param broaden: Forwarded to :func:`select_kits_v2` to widen recall.
-    :param limit: Maximum number of candidate kits to return.
+    :param limit: Maximum number of score-ranked candidate kits to return.
+        Kits marked ``always_select`` in their manifest are appended after
+        this cut when eligible, so the response may contain more than
+        *limit* kits.
     :param max_sections_per_kit: Cap on non-``always_load`` sections offered
         for on-demand fetch per kit.
     :param pre_inferred: Externally-inferred traits (e.g. from MCP sampling in
