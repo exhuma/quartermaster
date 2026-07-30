@@ -36,6 +36,7 @@ import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from app.logging_config import configure_logging
@@ -56,6 +57,7 @@ from app import health as health_probes
 from app import telemetry
 from app.auth import JWTAuthMiddleware, NoAuthMiddleware
 from app.authz import EditorRequiredError, PrivateKitAccessError
+from app.catalog.mcp_prompts_provider import PromptsCatalogProvider
 from app.changelog import load_changelog_json
 from app.config import get_settings
 from app.dav.webdav_app import mount_dav
@@ -97,6 +99,16 @@ from app.notifications import gap_tools_enabled
 from app.notifications import request_kit_extension as _request_kit_extension
 from app.observability import local_store
 from app.personalization import profile_hint
+from app.private_prompts import private_root_for
+from app.prompt_catalog import (
+    PromptConflictError,
+    PromptLayerNotFoundError,
+    PromptLayerReadonlyError,
+    PromptNotFoundError,
+    PromptValidationError,
+)
+from app.prompt_catalog import list_all_prompts as list_all_catalog_prompts
+from app.prompt_catalog import read_prompt as read_catalog_prompt
 from app.prompts import get_canned_prompt as _get_canned_prompt
 from app.prompts import list_canned_prompts as _list_canned_prompts
 from app.resolver import build_ranker
@@ -107,6 +119,8 @@ from app.routers import (
     integration,
     kits_admin,
     kits_layers,
+    prompts_admin,
+    prompts_layers,
 )
 from app.routers import (
     eval as eval_router,
@@ -121,6 +135,9 @@ from app.routers import (
     private_kits as private_kits_router,
 )
 from app.routers import (
+    private_prompts as private_prompts_router,
+)
+from app.routers import (
     roles as roles_router,
 )
 from app.routers import (
@@ -131,8 +148,10 @@ from app.sampling import (
     client_supports_elicitation,
     client_supports_sampling,
 )
+from app.services import prompt_catalog_service as prompt_catalog_svc
 from app.storage import user_memory
 from app.storage.kit_writes import KitPathError
+from app.storage.prompt_writes import PromptPathError
 from app.templating import load_asset
 from app.tokens import count_tokens
 from app.traits import load_vocabulary
@@ -351,6 +370,13 @@ def _register_canned_prompts() -> None:
 
 _register_canned_prompts()
 
+# Dynamic prompts catalog: a personal/team library of reusable agent
+# instructions, sourced live (uncached) from app.prompt_catalog on every
+# list/get. Static canned prompts registered just above always take
+# precedence over same-named provider prompts (see
+# app.catalog.mcp_prompts_provider for the collision-avoidance note).
+mcp.add_provider(PromptsCatalogProvider())
+
 
 # Gap-filing tools. Defined unconditionally but only registered with the MCP
 # when a notification backend is configured (see the registration block
@@ -491,6 +517,145 @@ def reset_my_memory() -> dict:
 if _USER_MEMORY_ENABLED:
     mcp.tool(get_my_memory)
     mcp.tool(reset_my_memory)
+
+
+# ---------------------------------------------------------------------------
+# Prompts catalog: a personal/team library of reusable agent instructions,
+# separate from the static canned templates above (app.prompts / list_prompts
+# / get_prompt). See app.prompt_catalog for the domain module and
+# app.catalog.mcp_prompts_provider for the native MCP prompt surface these
+# tools complement.
+# ---------------------------------------------------------------------------
+
+
+def _caller_private_prompt_root() -> Path:
+    """Return the authenticated caller's private-prompt write root.
+
+    :raises ValueError: If there is no authenticated caller — writes to the
+        prompts catalog are always scoped to a caller's own private overlay.
+    """
+    sub = current_sub()
+    if not sub:
+        raise ValueError(
+            "Managing catalog prompts requires an authenticated caller."
+        )
+    return private_root_for(sub)
+
+
+def _prompt_dict(detail: Any) -> dict[str, Any]:
+    """Render a ``PromptDetail`` as the ``{name, title, description, body}``
+    shape returned by the MCP prompt tools."""
+    return {
+        "name": detail.name,
+        "title": detail.title,
+        "description": detail.description,
+        "body": detail.body,
+    }
+
+
+@mcp.tool
+def list_catalog_prompts() -> list[dict]:
+    """
+    List prompts from the shared catalog plus the caller's private overlay.
+
+    :returns: ``{name, title, description, source_layer}`` per entry.
+    """
+    return [
+        {
+            "name": p.name,
+            "title": p.title,
+            "description": p.description,
+            "source_layer": p.source_layer,
+        }
+        for p in list_all_catalog_prompts()
+    ]
+
+
+@mcp.tool
+def get_catalog_prompt(name: str) -> dict:
+    """
+    Return a single catalog prompt's metadata and body.
+
+    :param name: Prompt name from ``list_catalog_prompts``.
+    :returns: ``{name, title, description, body}``.
+    :raises ValueError: If *name* is unknown.
+    """
+    try:
+        detail = read_catalog_prompt(name)
+    except PromptNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
+    return _prompt_dict(detail)
+
+
+@mcp.tool
+def create_catalog_prompt(
+    name: str, body: str, title: str = "", description: str = ""
+) -> dict:
+    """
+    Create a prompt in the caller's own private overlay.
+
+    Writes only ever land in the caller's private catalog — never the
+    shared/team layers, which are REST/WebDAV-authored only.
+
+    :param name: New prompt name (lowercase, hyphenated).
+    :param body: Markdown body.
+    :param title: Optional frontmatter title.
+    :param description: Optional frontmatter description.
+    :returns: The stored prompt (``{name, title, description, body}``).
+    :raises ValueError: If the name is invalid, reserved by a built-in
+        canned prompt, or the content is otherwise invalid.
+    """
+    try:
+        detail = prompt_catalog_svc.put_prompt(
+            name=name,
+            title=title,
+            description=description,
+            body=body,
+            root=_caller_private_prompt_root(),
+        )
+    except (PromptConflictError, PromptValidationError) as exc:
+        raise ValueError(str(exc)) from exc
+    return _prompt_dict(detail)
+
+
+@mcp.tool
+def update_catalog_prompt(
+    name: str, body: str, title: str = "", description: str = ""
+) -> dict:
+    """
+    Create or replace a prompt in the caller's own private overlay.
+
+    Same private-overlay-only scoping as ``create_catalog_prompt``.
+
+    :param name: Prompt name.
+    :param body: Markdown body.
+    :param title: Optional frontmatter title.
+    :param description: Optional frontmatter description.
+    :returns: The stored prompt (``{name, title, description, body}``).
+    :raises ValueError: If the name is invalid, reserved by a built-in
+        canned prompt, or the content is otherwise invalid.
+    """
+    try:
+        detail = prompt_catalog_svc.put_prompt(
+            name=name,
+            title=title,
+            description=description,
+            body=body,
+            root=_caller_private_prompt_root(),
+        )
+    except (PromptConflictError, PromptValidationError) as exc:
+        raise ValueError(str(exc)) from exc
+    return _prompt_dict(detail)
+
+
+@mcp.tool
+def delete_catalog_prompt(name: str) -> None:
+    """
+    Delete a prompt from the caller's own private overlay. Idempotent.
+
+    :param name: Prompt name.
+    """
+    prompt_catalog_svc.delete_prompt(name, root=_caller_private_prompt_root())
 
 
 @mcp.tool
@@ -1298,6 +1463,12 @@ _EXCEPTION_STATUS: dict[type[Exception], int] = {
     KitPathError: 400,
     KitLayerReadonlyError: 403,
     EvalJobNotFoundError: 404,
+    PromptNotFoundError: 404,
+    PromptLayerNotFoundError: 404,
+    PromptValidationError: 422,
+    PromptConflictError: 409,
+    PromptPathError: 400,
+    PromptLayerReadonlyError: 403,
 }
 
 
@@ -1429,6 +1600,11 @@ def create_app() -> FastAPI:
     # /api/kits/layers/* paths are matched before /api/kits/{name}.
     application.include_router(kits_layers.router)
     application.include_router(kits_admin.router)
+    # prompts_layers must be registered before prompts_admin so that the
+    # more-specific /api/prompts/layers/* paths are matched before
+    # /api/prompts/{name}, mirroring the kits_layers/kits_admin ordering.
+    application.include_router(prompts_layers.router)
+    application.include_router(prompts_admin.router)
     application.include_router(integration.router)
     application.include_router(eval_router.router)
     application.include_router(clients.router)
@@ -1437,6 +1613,7 @@ def create_app() -> FastAPI:
     application.include_router(me_router.router)
     application.include_router(roles_router.router)
     application.include_router(private_kits_router.router)
+    application.include_router(private_prompts_router.router)
     application.include_router(search_router.router)
 
     # Dev-only auth bypass: the token-minting router is imported and mounted

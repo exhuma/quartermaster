@@ -233,6 +233,7 @@ _EMBEDDINGS_CACHE_DEFAULT = _SERVER_ROOT / "var" / "embeddings"
 _METRICS_LOCAL_DB_DEFAULT = _SERVER_ROOT / "var" / "metrics.db"
 _ROLE_STORE_DEFAULT = _SERVER_ROOT / "var" / "roles.toml"
 _PRIVATE_KITS_DEFAULT = _SERVER_ROOT / "var" / "private-kits"
+_PRIVATE_PROMPTS_DEFAULT = _SERVER_ROOT / "var" / "private-prompts"
 _USER_MEMORY_DEFAULT = _SERVER_ROOT / "var" / "user-memory.toml"
 
 
@@ -447,6 +448,21 @@ class Settings(BaseSettings):
     :param metrics_local_retention_days: How many days of usage events the local
         store keeps before pruning (default 30). Long-term history is delegated
         to OpenTelemetry; this store is a short, capped complement.
+    :param prompts_root: Path to a single-root prompts catalog directory
+        (``QM_PROMPTS_ROOT``). Mirrors ``kits_root`` but for the separate
+        prompts catalog. Superseded by ``prompt_layers_file`` when both are
+        set. Unlike kits, **no prompt root is required** — a deployment with
+        neither ``prompts_root`` nor ``prompt_layers_file`` configured is a
+        legitimate steady state: the user's personal private-overlay prompts
+        still work with zero operator configuration.
+    :param prompt_layers_file: Path to a TOML file listing named prompt
+        layers (``QM_PROMPT_LAYERS_FILE``), in the same ``[[layer]]`` shape
+        as ``kit_layers_file``. If set, ``prompts_root`` is ignored. When
+        set, at least one layer must be writable (same rule as kits); this
+        requirement does not apply when ``prompt_layers_file`` is unset.
+    :param private_prompts_root: Owner-scoped root for private prompts (never
+        the shared catalog), mirroring ``private_kits_root``. In production,
+        point this at a writable data volume.
     """
 
     # All environment variables are prefixed with the application name
@@ -487,6 +503,12 @@ class Settings(BaseSettings):
     # (never the public catalog), so a missed enumeration path cannot leak
     # them. In production, point this at a writable data volume.
     private_kits_root: Path = _PRIVATE_KITS_DEFAULT
+    # Prompts catalog (separate from kits): a personal/team library of
+    # reusable agent instructions, exposed as native MCP prompts. Unlike
+    # kits, no root is required — see effective_prompt_layers.
+    prompts_root: Path | None = None
+    prompt_layers_file: Path | None = None
+    private_prompts_root: Path = _PRIVATE_PROMPTS_DEFAULT
     dav_require_tls: bool = True
     webui_dist: Path = _WEBUI_DIST_DEFAULT
     docs_dist: Path = _DOCS_DIST_DEFAULT
@@ -592,6 +614,8 @@ class Settings(BaseSettings):
     # Layers parsed from ``kit_layers_file`` once, at validation time, so the
     # file is read a single time and ``effective_layers`` stays cheap.
     _file_layers: list[KitLayerConfig] | None = PrivateAttr(default=None)
+    # Same caching, for the separate prompts catalog's ``prompt_layers_file``.
+    _prompt_file_layers: list[KitLayerConfig] | None = PrivateAttr(default=None)
 
     @field_validator("initial_editors", mode="before")
     @classmethod
@@ -659,6 +683,28 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_prompt_config(self) -> Settings:
+        """Validate the optional prompts-catalog layer configuration.
+
+        Unlike kits, prompts remain valid with **zero** layers configured
+        (no ``prompt_layers_file``, no ``prompts_root``) — the caller's
+        private overlay alone is a legitimate steady state that needs no
+        operator config. So this only parses/validates
+        ``prompt_layers_file`` when it is actually set; there is no
+        "at least one of prompts_root/prompt_layers_file" requirement.
+        """
+        if self.prompt_layers_file is not None:
+            self._prompt_file_layers = load_layers_from_toml(
+                self.prompt_layers_file
+            )
+            if all(layer.readonly for layer in self._prompt_file_layers):
+                raise ValueError(
+                    "At least one prompt layer must be writable "
+                    "(not all layers can have readonly=true)."
+                )
+        return self
+
     @property
     def effective_layers(self) -> list[KitLayerConfig]:
         """
@@ -676,6 +722,28 @@ class Settings(BaseSettings):
             return self._file_layers
         # kits_root is guaranteed non-None here by the model validator
         return [KitLayerConfig(name="default", path=self.kits_root)]  # type: ignore[arg-type]
+
+    @property
+    def effective_prompt_layers(self) -> list[KitLayerConfig]:
+        """
+        Return the ordered list of prompt layers (base → overlay), or ``[]``.
+
+        Mirrors :attr:`effective_layers`'s precedence (``prompt_layers_file``
+        wins, else ``prompts_root`` is wrapped in a single ``"default"``
+        layer) but, unlike kits, returns an **empty list** rather than
+        raising when neither is configured — a deployment served purely by
+        each caller's private overlay is a valid steady state.
+
+        :returns: Possibly-empty list of :class:`KitLayerConfig`, lowest
+            priority first.
+        """
+        if self._prompt_file_layers is not None:
+            return self._prompt_file_layers
+        if self.prompts_root is not None:
+            return [
+                KitLayerConfig(name="default", path=self.prompts_root)
+            ]
+        return []
 
     def version_policy(self) -> dict[str, dict[str, Any]]:
         """
