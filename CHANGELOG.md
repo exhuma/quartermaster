@@ -1,6 +1,29 @@
 # Changelog
 
 
+## Release 2026.7.30 (2026-07-30)
+
+Kits that are genuinely tech-agnostic (design principles, code style,
+
+testing strategy) could never earn enough trait-match score to survive
+
+ranking alongside implementation-specific kits, so they silently 
+never
+loaded. A kit can now set `always_select: true` in its manifest 
+to be
+appended to every `select_kits`/`resolve_kits` result once 
+eligible,
+bypassing score-based ranking and truncation entirely.
+
+
+
+### Added
+- ☆ **[MCP] `always_select` lets a kit bypass ranking and truncation
+  entirely** *@ 2026.7.30b1*
+
+  A kit's `applicability.json` can set `always_select: true` so it is appended to every `select_kits`/`resolve_kits` result once eligible, instead of competing on trait-match score — fixing tech-agnostic kits (design principles, code style, testing strategy, etc.) that could never earn enough score to survive ranking alongside implementation-specific kits.
+
+
 ## Release 2026.7.27 (2026-07-27)
 
 Quartermaster's first beta release. Kit search now reaches inside
@@ -41,12 +64,6 @@ default response drops diagnostic-only
   leaner payload** *@ 2026.7.27b1*
 
   A per-session ledger omits `always_load` sections already inlined earlier in the same session (listed under a new self-healing `already_delivered` field with a `get_kit` re-fetch note), and the default response drops fields redundant with the opt-in `include_diagnostics` block. Dedup savings are visible as a "Suppressed" series/KPI in the web UI Metrics view.
-
-
-### Fixed
-- [UI] 30-day metrics window now shows real data *@ 2026.7.27b2*
-
-  The Metrics dashboard's 30d option silently returned the same data as 7d because the local metrics store's retention default (7 days) capped every request past that window. Retention now defaults to 30 days, and the picker greys out any window option that exceeds the server's actual configured retention (with an explanatory tooltip) so a lower operator-set retention can't reproduce the same silently-dead button.
 
 
 ## Release 2026.7.14 (2026-07-14)

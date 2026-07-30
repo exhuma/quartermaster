@@ -22,6 +22,9 @@
 
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
 
+# --- 2026.7.30 -----------------------------------------------------------------------------------------------------------------------------------------------------
+2026.7.30b1   ; added    ; [MCP] `always_select` lets a kit bypass ranking and truncation entirely          ;        ;   ; x ; A kit's `applicability.json` can set `always_select: true` so it is appended to every `select_kits`/`resolve_kits` result once eligible, instead of competing on trait-match score — fixing tech-agnostic kits (design principles, code style, testing strategy, etc.) that could never earn enough score to survive ranking alongside implementation-specific kits.
+
 # --- 2026.7.27 -----------------------------------------------------------------------------------------------------------------------------------------------------
 2026.7.27b1   ; added    ; [MCP] Free-text search across kit metadata and instruction content            ;        ;   ; x ; New `search_kit_content` tool complements the trait-based `select_kits`/`resolve_kits` for literal-phrase lookups — finding which kit documents a specific config key, error message, or code pattern — by searching kit name, summary, applicability fields, and every section's title/gloss/body.
 2026.7.27b1   ; added    ; [API] `GET /api/search` for free-text kit search                              ;        ;   ;   ; Searches kit metadata and instruction content and returns ranked kits with matched applicability fields and matched section snippets, powering the new web-UI search box and the `search_kit_content` MCP tool.
