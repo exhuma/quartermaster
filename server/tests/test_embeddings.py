@@ -248,6 +248,176 @@ def test_get_embedder_disabled_returns_none() -> None:
     assert get_embedder(settings) is None
 
 
+@pytest.fixture(autouse=True)
+def _reset_embeddings_module_state():
+    # get_embedder memoizes FastEmbedEmbedder instances and warm_up flips a
+    # process-wide readiness flag; both are module-level state that must
+    # not leak across tests.
+    embeddings._reset_embedder_cache_for_tests()
+    embeddings._reset_readiness_for_tests()
+    yield
+    embeddings._reset_embedder_cache_for_tests()
+    embeddings._reset_readiness_for_tests()
+
+
+def test_get_embedder_memoizes_by_model_cache_dir_and_threads(
+    tmp_path: Path,
+) -> None:
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_threads": 2,
+        },
+    )()
+    first = get_embedder(settings)
+    second = get_embedder(settings)
+    assert first is second
+
+    other_threads = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_threads": 4,
+        },
+    )()
+    assert get_embedder(other_threads) is not first
+
+
+def test_fastembed_embedder_forwards_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _StubTextEmbedding:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.0] for _ in texts]
+
+    import fastembed
+
+    monkeypatch.setattr(fastembed, "TextEmbedding", _StubTextEmbedding)
+
+    embedder = embeddings.FastEmbedEmbedder("fake-model", threads=3)
+    embedder.encode(["hello"])
+    assert captured["threads"] == 3
+
+
+def test_warm_up_sets_readiness_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_warmup_niceness": 0,
+        },
+    )()
+
+    assert embeddings.is_ready() is False
+    assert embeddings.warm_up(settings) is True
+    assert embeddings.is_ready() is True
+
+
+def test_warm_up_leaves_readiness_flag_unset_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: None)
+    assert embeddings.warm_up(object()) is False
+    assert embeddings.is_ready() is False
+
+
+def test_warm_up_applies_configured_niceness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+    calls: list[int] = []
+    monkeypatch.setattr(embeddings.os, "nice", calls.append)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_warmup_niceness": 15,
+        },
+    )()
+
+    embeddings.warm_up(settings)
+
+    assert calls == [15]
+
+
+def test_warm_up_tolerates_niceness_not_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+
+    def _boom(_n: int) -> None:
+        raise OSError("not supported on this platform")
+
+    monkeypatch.setattr(embeddings.os, "nice", _boom)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_warmup_niceness": 10,
+        },
+    )()
+
+    # Must not raise, and warmup still completes.
+    assert embeddings.warm_up(settings) is True
+    assert embeddings.is_ready() is True
+
+
+def test_build_trait_engines_excludes_embedding_until_warmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = FakeEmbedder()
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path / "emb",
+            "embeddings_min_score": 0.3,
+            "embeddings_top_k_per_category": 4,
+        },
+    )()
+    monkeypatch.setattr("app.config.get_settings", lambda: settings)
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+
+    # Warmup hasn't completed: a working embedder must not be used yet, so a
+    # request in the gap falls back to the lexical floor instead of racing
+    # the background warmup thread into a second, concurrent model load.
+    engines = resolver._build_trait_engines()
+    assert not any(e.name == "embedding" for e in engines)
+
+    embeddings._ready_event.set()
+    engines = resolver._build_trait_engines()
+    assert any(e.name == "embedding" for e in engines)
+
+
 def test_pipeline_uses_embedding_engine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

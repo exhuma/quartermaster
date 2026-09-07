@@ -11,6 +11,14 @@ returns ``None`` and the resolver degrades to the lexical floor.
 Trait-document embeddings are cached on disk keyed by the embedding model id
 and the catalog fingerprint, so editing a kit invalidates them automatically
 and a warm process never re-embeds the vocabulary.
+
+:func:`warm_up` runs from a dedicated background thread at startup (see
+``app.main``), not on the request path: it caps onnxruntime's thread count
+(``embeddings_threads``) so a single embed burst can't claim every core on
+the host, lowers that thread's OS scheduling priority
+(``embeddings_warmup_niceness``), and only flips :func:`is_ready` once
+warmed — until then, callers degrade to the lexical floor rather than race
+the background thread into a second, concurrent model load.
 """
 
 from __future__ import annotations
@@ -18,7 +26,10 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
+import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -53,9 +64,16 @@ class FastEmbedEmbedder:
     a missing dependency surfaces only when embeddings are actually used.
     """
 
-    def __init__(self, model_id: str, *, cache_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        model_id: str,
+        *,
+        cache_dir: str | None = None,
+        threads: int | None = None,
+    ) -> None:
         self.model_id = model_id
         self._cache_dir = cache_dir
+        self._threads = threads
         self._model: Any | None = None
 
     def _ensure_model(self) -> Any:
@@ -67,6 +85,10 @@ class FastEmbedEmbedder:
                 # Persist model files alongside our caches (e.g. on the data
                 # volume) so they survive restarts and need no re-download.
                 kwargs["cache_dir"] = self._cache_dir
+            if self._threads is not None:
+                # Caps onnxruntime's intra/inter-op thread pools so a
+                # single encode burst can't claim every core on the host.
+                kwargs["threads"] = self._threads
             self._model = TextEmbedding(**kwargs)
         return self._model
 
@@ -77,24 +99,42 @@ class FastEmbedEmbedder:
         return [list(map(float, vector)) for vector in model.embed(texts)]
 
 
+@lru_cache(maxsize=8)
+def _cached_embedder(
+    model_id: str, model_cache: str | None, threads: int | None
+) -> Embedder | None:
+    try:
+        return FastEmbedEmbedder(
+            model_id, cache_dir=model_cache, threads=threads
+        )
+    except Exception as exc:  # pragma: no cover - depends on environment
+        logger.warning("embeddings unavailable, degrading: %s", exc)
+        return None
+
+
+def _reset_embedder_cache_for_tests() -> None:
+    """Clear the memoized embedder builder. Test-only."""
+    _cached_embedder.cache_clear()
+
+
 def get_embedder(settings: Any) -> Embedder | None:
     """
     Return a configured embedder, or ``None`` to degrade to lexical.
 
     Returns ``None`` when embeddings are disabled or the dependency/model
     cannot be loaded, so the resolver never fails because of embeddings.
+
+    The underlying :class:`FastEmbedEmbedder` is memoized (by model id,
+    cache dir, and thread count), so the model instance the startup warmup
+    loads is the same one real requests reuse afterward — a fresh call
+    never re-pays the ONNX session construction cost.
     """
     if not getattr(settings, "embeddings_enabled", False):
         return None
     cache_dir = getattr(settings, "embeddings_cache_dir", None)
     model_cache = str(Path(cache_dir) / "models") if cache_dir else None
-    try:
-        return FastEmbedEmbedder(
-            settings.embeddings_model, cache_dir=model_cache
-        )
-    except Exception as exc:  # pragma: no cover - depends on environment
-        logger.warning("embeddings unavailable, degrading: %s", exc)
-        return None
+    threads = getattr(settings, "embeddings_threads", None)
+    return _cached_embedder(settings.embeddings_model, model_cache, threads)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -152,21 +192,57 @@ def build_trait_embeddings(
     return embeddings
 
 
+_ready_event = threading.Event()
+
+
+def is_ready() -> bool:
+    """Return whether the background warmup has completed successfully."""
+    return _ready_event.is_set()
+
+
+def _reset_readiness_for_tests() -> None:
+    """Clear the readiness flag. Test-only."""
+    _ready_event.clear()
+
+
+def _apply_warmup_niceness(settings: Any) -> None:
+    """
+    Best-effort, Linux-only: lower the calling thread's scheduling priority.
+
+    Must only be called from a dedicated, throwaway thread (never a
+    pooled/reused one) since ``os.nice`` is per-OS-thread on Linux and
+    cumulative — calling it more than once on the same thread would keep
+    lowering its priority.
+    """
+    niceness = getattr(settings, "embeddings_warmup_niceness", 0)
+    if not niceness:
+        return
+    try:
+        os.nice(niceness)
+    except (AttributeError, OSError) as exc:
+        logger.debug("could not set warmup thread niceness: %s", exc)
+
+
 def warm_up(settings: Any) -> bool:
     """
     Eagerly load the embedding model and build the trait-embedding cache.
 
-    Called once at startup so the first ``resolve_kits`` request does not pay
-    the lazy model-load + vocabulary-embedding cost (the cold start that,
-    unmitigated, times out the first request in a fresh pod). Builds the
-    on-disk trait-embedding cache (loading the model on a cache miss) and then
-    forces one encode so the in-memory ONNX session is live even when the disk
-    cache was already warm.
+    Called from a dedicated background thread at startup so the first
+    ``resolve_kits`` request does not pay the lazy model-load +
+    vocabulary-embedding cost (the cold start that, unmitigated, times out
+    the first request in a fresh pod). Builds the on-disk trait-embedding
+    cache (loading the model on a cache miss) and then forces one encode so
+    the in-memory ONNX session is live even when the disk cache was
+    already warm. On success, flips the readiness flag :func:`is_ready`
+    reports, so the resolver only starts using the embedding engine once
+    this returns — a request racing an in-progress warmup falls back to
+    lexical instead of triggering its own concurrent model load.
 
     :param settings: Application settings (reads ``embeddings_cache_dir``).
     :returns: ``True`` if the embedder was warmed, ``False`` when embeddings
         are disabled or the dependency/model is unavailable.
     """
+    _apply_warmup_niceness(settings)
     embedder = get_embedder(settings)
     if embedder is None:
         return False
@@ -175,6 +251,7 @@ def warm_up(settings: Any) -> bool:
     # Guarantee the model is resident even on a trait-embedding cache hit,
     # where build_trait_embeddings returns without touching the embedder.
     embedder.encode(["warmup"])
+    _ready_event.set()
     return True
 
 
@@ -265,5 +342,6 @@ __all__ = [
     "build_trait_embeddings",
     "cosine",
     "get_embedder",
+    "is_ready",
     "warm_up",
 ]

@@ -198,7 +198,7 @@ def _build_trait_engines() -> list[TraitEngine]:
     from pydantic import ValidationError
 
     from app.config import get_settings
-    from app.embeddings import EmbeddingTraitEngine, get_embedder
+    from app.embeddings import EmbeddingTraitEngine, get_embedder, is_ready
     from app.llm import LLMTraitEngine, get_llm_backend
 
     try:
@@ -209,9 +209,12 @@ def _build_trait_engines() -> list[TraitEngine]:
     # Build the deterministic embedding engine first: it doubles as the LLM
     # engine's section ranker (so an LLM resolve still ranks sections by
     # embedding similarity at no extra LLM cost), and it is the fallback when
-    # the LLM yields nothing.
+    # the LLM yields nothing. Skipped until the background startup warmup
+    # completes (app.embeddings.is_ready), so a request never races the
+    # warmup thread into a second, concurrent model load — it uses the
+    # lexical floor in the meantime.
     embedding_engine: EmbeddingTraitEngine | None = None
-    embedder = get_embedder(settings)
+    embedder = get_embedder(settings) if is_ready() else None
     if embedder is not None:
         embedding_engine = EmbeddingTraitEngine(
             embedder,

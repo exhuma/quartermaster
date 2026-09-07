@@ -2,12 +2,15 @@
 
 The warmup moves the fastembed model load + trait-vocabulary embedding off the
 first ``resolve_kits`` request (where it otherwise causes a cold-start timeout)
-and onto pod startup. Like the metrics-store init, it is best-effort: a failure
-must never block the app from starting.
+and onto a dedicated background thread started at startup. Like the
+metrics-store init, it is best-effort: a failure must never block the app from
+starting, and — unlike the metrics-store init — startup itself must never wait
+for it to finish either.
 """
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -59,3 +62,42 @@ def test_warm_embeddings_announces_start_before_completion(
     start = next(i for i, m in enumerate(messages) if "warming embedding" in m)
     done = next(i for i, m in enumerate(messages) if "warmed at startup" in m)
     assert start < done
+
+
+def test_start_embeddings_warmup_returns_without_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+    started = threading.Event()
+
+    def _blocking_warm_up(_s: object) -> bool:
+        started.set()
+        release.wait(timeout=5)
+        return True
+
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("app.embeddings.warm_up", _blocking_warm_up)
+
+    thread = main._start_embeddings_warmup()
+    try:
+        # The call itself must not block on warm_up finishing.
+        assert started.wait(timeout=5)
+        assert thread.is_alive()
+    finally:
+        release.set()
+        thread.join(timeout=5)
+
+
+def test_start_embeddings_warmup_uses_a_dedicated_daemon_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr("app.embeddings.warm_up", lambda _s: True)
+
+    thread = main._start_embeddings_warmup()
+    try:
+        assert thread.daemon is True
+        assert thread.name == "embeddings-warmup"
+        assert thread is not threading.current_thread()
+    finally:
+        thread.join(timeout=5)

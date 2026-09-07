@@ -370,6 +370,15 @@ class Settings(BaseSettings):
         be inferred by the embedding engine.
     :param embeddings_top_k_per_category: Maximum traits the embedding
         engine emits per category.
+    :param embeddings_threads: Cap on onnxruntime's intra/inter-op thread
+        count for embedding inference (``None`` = library default, which
+        uses every visible core). Bounds how much CPU a single embed burst
+        — especially the startup vocabulary warmup — can take from the
+        host.
+    :param embeddings_warmup_niceness: POSIX niceness delta applied (via
+        ``os.nice``, Linux-only, best-effort) to the dedicated background
+        thread that warms the embedding model at startup, so it yields CPU
+        to request-handling threads under contention.
     :param llm_provider: Optional LLM backend selector for ``resolve_kits``
         trait inference: ``"openai"`` (OpenAI-compatible endpoint) or
         ``"anthropic"``. Unset disables the LLM layer entirely.
@@ -547,6 +556,8 @@ class Settings(BaseSettings):
     embeddings_cache_dir: Path = _EMBEDDINGS_CACHE_DEFAULT
     embeddings_min_score: float = 0.30
     embeddings_top_k_per_category: int = 4
+    embeddings_threads: int | None = 2
+    embeddings_warmup_niceness: int = 10
     llm_provider: str | None = None  # "openai" | "anthropic"
     llm_base_url: str | None = None  # OpenAI-compatible base URL
     llm_model: str | None = None

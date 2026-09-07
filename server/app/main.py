@@ -35,6 +35,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -208,13 +209,14 @@ def _gap_tools_enabled() -> bool:
 
 
 def _warm_embeddings() -> None:
-    """Eagerly warm the embedding model at startup (best-effort).
+    """Eagerly warm the embedding model in the background (best-effort).
 
     Moves the fastembed model load + trait-vocabulary embedding off the first
     ``resolve_kits`` request (the cold start that otherwise times out in a
-    fresh pod) and onto startup. Any failure is swallowed: the resolver still
-    degrades to lexical inference at request time, so a cold or missing model
-    must never block the app from starting.
+    fresh pod) and onto a dedicated startup thread (see
+    :func:`_start_embeddings_warmup`). Any failure is swallowed: the resolver
+    still degrades to lexical inference at request time, so a cold or
+    missing model must never block the app from starting or serving traffic.
     """
     from app import embeddings
 
@@ -226,6 +228,25 @@ def _warm_embeddings() -> None:
             logger.info("embedding model warmed at startup")
     except Exception:  # noqa: BLE001 - warmup must not block startup
         logger.warning("embedding warmup skipped", exc_info=True)
+
+
+def _start_embeddings_warmup() -> threading.Thread:
+    """Spawn the embedding warmup on a dedicated, throwaway daemon thread.
+
+    Deliberately not ``asyncio.to_thread`` / the shared default executor:
+    that pool is reused by per-request blocking work (e.g. ``_resolve_once``),
+    and the warmup thread's OS scheduling priority is lowered (see
+    ``app.embeddings._apply_warmup_niceness``) — a pooled thread could later
+    be reused to serve a real request and carry that lowered priority with
+    it. A dedicated thread dies with the warmup and never returns to a pool.
+    Not awaited: the caller (the app lifespan) proceeds immediately so
+    startup is never gated on this finishing.
+    """
+    thread = threading.Thread(
+        target=_warm_embeddings, name="embeddings-warmup", daemon=True
+    )
+    thread.start()
+    return thread
 
 
 _GAP_TOOLS_ENABLED = _gap_tools_enabled()
@@ -1539,16 +1560,19 @@ def create_app() -> FastAPI:
 
         Composed (not replacing) so the OTEL-independent dashboard store is
         opened once at startup; a failure here never blocks the app (init is
-        itself best-effort). The embedding warmup is offloaded to a thread so
-        the event loop stays responsive, but startup completes only after it
-        returns — so k8s marks the pod Ready only once the first
-        ``resolve_kits`` will be served warm, not cold.
+        itself best-effort). The embedding warmup runs on a dedicated
+        background thread (:func:`_start_embeddings_warmup`) that is started
+        but never awaited, so startup completes — and k8s marks the pod
+        Ready, and uvicorn opens its listening socket — immediately.
+        ``resolve_kits`` serves lexical-only results until warmup finishes in
+        the background, then picks up embeddings automatically
+        (``app.embeddings.is_ready``).
         """
         try:
             local_store.init(get_settings())
         except Exception:  # noqa: BLE001 - metrics must not block startup
             logger.warning("local metrics store init skipped", exc_info=True)
-        await asyncio.to_thread(_warm_embeddings)
+        _start_embeddings_warmup()
         async with mcp_app.lifespan(app):
             yield
 
