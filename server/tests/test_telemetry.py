@@ -207,6 +207,37 @@ def test_catalog_gauges_report_per_domain(harness: Any) -> None:
     assert points["qm.catalog.always_load_tokens"]
 
 
+def test_embeddings_gauges_report_warmup_state(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import embeddings
+
+    reader, _exporter = harness
+    monkeypatch.setattr(embeddings, "is_ready", lambda: True)
+    monkeypatch.setattr(embeddings, "warmup_progress", lambda: (7, 9))
+    monkeypatch.setattr(embeddings, "warmup_thread_niceness", lambda: 10)
+
+    points = _points(reader)
+
+    assert points["qm.embeddings.ready"][0].value == 1
+    assert points["qm.embeddings.warmup_docs_done"][0].value == 7
+    assert points["qm.embeddings.warmup_docs_total"][0].value == 9
+    assert points["qm.embeddings.warmup_thread_niceness"][0].value == 10
+
+
+def test_embeddings_niceness_gauge_absent_when_unknown(
+    harness: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app import embeddings
+
+    reader, _exporter = harness
+    monkeypatch.setattr(embeddings, "warmup_thread_niceness", lambda: None)
+
+    points = _points(reader)
+
+    assert "qm.embeddings.warmup_thread_niceness" not in points
+
+
 def test_resolve_emits_pipeline_spans(harness: Any) -> None:
     _reader, exporter = harness
     resolver.resolve_kits(task="add a FastAPI REST endpoint")

@@ -18,6 +18,8 @@ and whether that stays flat per domain as the catalog grows:
 - ``qm.resolve.{calls,engine,confidence,coverage,broadening_recommended}`` and
   ``qm.trait.matched`` — selection health.
 - ``qm.tool.{calls,duration}`` — per-tool latency (every MCP tool).
+- ``qm.embeddings.*`` observable gauges — background warmup readiness, catalog
+  vocabulary embed progress, and the warmup thread's live OS niceness.
 
 **Privacy**: no task text is ever recorded. Trait *values*, kit names and
 section ids all come from the catalog vocabulary, not from client input.
@@ -598,6 +600,43 @@ def _create_instruments(meter: Any) -> None:
         description="Always-load kit tokens in the catalog, per domain.",
     )
 
+    meter.create_observable_gauge(
+        "qm.embeddings.ready",
+        callbacks=[_embeddings_ready_observer],
+        unit="1",
+        description=(
+            "Whether the background embedding warmup has finished (1) or "
+            "resolve_kits is still degraded to the lexical floor (0)."
+        ),
+    )
+    meter.create_observable_gauge(
+        "qm.embeddings.warmup_docs_total",
+        callbacks=[_embeddings_progress_observer("total")],
+        unit="1",
+        description=(
+            "Trait pseudo-documents to embed in the current/last warmup "
+            "pass (the catalog vocabulary size)."
+        ),
+    )
+    meter.create_observable_gauge(
+        "qm.embeddings.warmup_docs_done",
+        callbacks=[_embeddings_progress_observer("done")],
+        unit="1",
+        description=(
+            "Trait pseudo-documents embedded so far in the current/last "
+            "warmup pass."
+        ),
+    )
+    meter.create_observable_gauge(
+        "qm.embeddings.warmup_thread_niceness",
+        callbacks=[_embeddings_niceness_observer],
+        unit="1",
+        description=(
+            "The embedding warmup thread's OS niceness, read back live "
+            "(absent before warmup starts or when unsupported)."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Catalog stats (observable-gauge backing)
@@ -628,6 +667,53 @@ def _observe(field: str) -> Any:
             return []
 
     return _callback
+
+
+def _embeddings_ready_observer(_options: Any) -> list[Any]:
+    """Observable-gauge callback: 1 once the background warmup is ready."""
+    try:
+        # Local import: app.embeddings -> app.resolver -> app.telemetry is
+        # already a cycle, so this module cannot import app.embeddings at
+        # load time.
+        from app.embeddings import is_ready
+
+        return [Observation(1 if is_ready() else 0, {})]
+    except Exception:  # noqa: BLE001 - a scrape must never raise
+        logger.debug("embeddings ready gauge failed", exc_info=True)
+        return []
+
+
+def _embeddings_progress_observer(field: str) -> Any:
+    """Return an observable-gauge callback yielding warmup docs done/total."""
+
+    def _callback(_options: Any) -> list[Any]:
+        try:
+            from app.embeddings import warmup_progress
+
+            done, total = warmup_progress()
+            value = done if field == "done" else total
+            return [Observation(value, {})]
+        except Exception:  # noqa: BLE001 - a scrape must never raise
+            logger.debug(
+                "embeddings progress gauge %r failed", field, exc_info=True
+            )
+            return []
+
+    return _callback
+
+
+def _embeddings_niceness_observer(_options: Any) -> list[Any]:
+    """Observable-gauge callback: the warmup thread's live OS niceness."""
+    try:
+        from app.embeddings import warmup_thread_niceness
+
+        niceness = warmup_thread_niceness()
+        if niceness is None:
+            return []
+        return [Observation(niceness, {})]
+    except Exception:  # noqa: BLE001 - a scrape must never raise
+        logger.debug("embeddings niceness gauge failed", exc_info=True)
+        return []
 
 
 def _catalog_stats() -> dict[str, _DomainStats]:

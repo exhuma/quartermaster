@@ -19,6 +19,12 @@ the host, lowers that thread's OS scheduling priority
 (``embeddings_warmup_niceness``), and only flips :func:`is_ready` once
 warmed — until then, callers degrade to the lexical floor rather than race
 the background thread into a second, concurrent model load.
+
+:func:`warmup_progress` and :func:`warmup_thread_niceness` expose the
+in-flight state (docs embedded so far, and the warmup thread's actual OS
+niceness read back live) so operators can watch warmup progress and verify
+the niceness setting took effect — see ``app.telemetry``'s ``qm.embeddings.*``
+gauges, served over ``/metrics`` when Prometheus is enabled.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ import math
 import os
 import re
 import threading
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
@@ -155,6 +162,29 @@ def _cache_path(cache_dir: Path, model_id: str, fingerprint: str) -> Path:
     return cache_dir / f"{safe_model}-{fingerprint}.json"
 
 
+# Chunk size for the vocabulary batch-encode on a cache miss. Keeps each
+# embedder.encode() call small enough that _warmup_progress advances visibly
+# (see app.telemetry's qm.embeddings.warmup_docs_done gauge) instead of
+# jumping from 0 to the full catalog in one opaque call.
+_EMBED_PROGRESS_CHUNK = 32
+
+
+@dataclass
+class _WarmupProgress:
+    """Docs embedded so far / total for the current or last warmup pass."""
+
+    done: int = 0
+    total: int = 0
+
+
+_warmup_progress = _WarmupProgress()
+
+
+def warmup_progress() -> tuple[int, int]:
+    """Return ``(docs_done, docs_total)`` for the current/last warmup pass."""
+    return (_warmup_progress.done, _warmup_progress.total)
+
+
 def build_trait_embeddings(
     embedder: Embedder, cache_dir: Path
 ) -> dict[str, list[float]]:
@@ -164,6 +194,9 @@ def build_trait_embeddings(
     Results are cached on disk keyed by the embedder's ``model_id`` and the
     current catalog fingerprint; a matching cache is reused without calling
     the embedder, and a stale one (any manifest/section edit) is replaced.
+    Either way, :func:`warmup_progress` reflects the outcome: an immediate
+    ``(n, n)`` on a cache hit, or an incrementing ``(done, total)`` as a miss
+    is embedded in small chunks.
 
     :param embedder: The embedding backend.
     :param cache_dir: Directory holding the on-disk cache.
@@ -173,13 +206,23 @@ def build_trait_embeddings(
     path = _cache_path(cache_dir, embedder.model_id, fingerprint)
     if path.is_file():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            _warmup_progress.total = len(cached)
+            _warmup_progress.done = len(cached)
+            return cached
         except (ValueError, OSError) as exc:
             logger.warning("ignoring unreadable embedding cache: %s", exc)
 
     docs = build_trait_docs()
     keys = [f"{doc.category}::{doc.value}" for doc in docs]
-    vectors = embedder.encode([doc.text for doc in docs])
+    texts = [doc.text for doc in docs]
+    _warmup_progress.total = len(texts)
+    _warmup_progress.done = 0
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), _EMBED_PROGRESS_CHUNK):
+        chunk = texts[start : start + _EMBED_PROGRESS_CHUNK]
+        vectors.extend(embedder.encode(chunk))
+        _warmup_progress.done = len(vectors)
     embeddings = dict(zip(keys, vectors, strict=True))
 
     try:
@@ -193,6 +236,7 @@ def build_trait_embeddings(
 
 
 _ready_event = threading.Event()
+_warmup_thread_native_id: int | None = None
 
 
 def is_ready() -> bool:
@@ -200,9 +244,33 @@ def is_ready() -> bool:
     return _ready_event.is_set()
 
 
+def warmup_thread_niceness() -> int | None:
+    """
+    Return the warmup thread's current OS niceness, read back live.
+
+    ``None`` before the warmup thread has started, or when the platform (or
+    a sandboxed/seccomp'd container runtime) does not support querying it —
+    distinct from a niceness of ``0``, which means the query succeeded and
+    the thread is running at normal priority. Lets an operator verify
+    ``embeddings_warmup_niceness`` actually took effect independent of
+    whether their process viewer (e.g. ``htop``) is configured to show
+    individual OS threads rather than just the main process row.
+    """
+    if _warmup_thread_native_id is None:
+        return None
+    try:
+        return os.getpriority(os.PRIO_PROCESS, _warmup_thread_native_id)
+    except (AttributeError, OSError):
+        return None
+
+
 def _reset_readiness_for_tests() -> None:
-    """Clear the readiness flag. Test-only."""
+    """Clear readiness, progress, and warmup-thread state. Test-only."""
+    global _warmup_thread_native_id
     _ready_event.clear()
+    _warmup_progress.done = 0
+    _warmup_progress.total = 0
+    _warmup_thread_native_id = None
 
 
 def _apply_warmup_niceness(settings: Any) -> None:
@@ -212,15 +280,23 @@ def _apply_warmup_niceness(settings: Any) -> None:
     Must only be called from a dedicated, throwaway thread (never a
     pooled/reused one) since ``os.nice`` is per-OS-thread on Linux and
     cumulative — calling it more than once on the same thread would keep
-    lowering its priority.
+    lowering its priority. Records the thread's native id regardless of
+    outcome so :func:`warmup_thread_niceness` can read the applied value
+    back live, and logs at WARNING (not DEBUG) on failure so a blocked
+    syscall — e.g. under a restrictive container seccomp profile — is
+    visible in default-level container logs rather than silently swallowed.
     """
+    global _warmup_thread_native_id
+    _warmup_thread_native_id = threading.get_native_id()
     niceness = getattr(settings, "embeddings_warmup_niceness", 0)
     if not niceness:
         return
     try:
-        os.nice(niceness)
+        applied = os.nice(niceness)
     except (AttributeError, OSError) as exc:
-        logger.debug("could not set warmup thread niceness: %s", exc)
+        logger.warning("could not set warmup thread niceness: %s", exc)
+        return
+    logger.info("embedding warmup thread niceness set to %s", applied)
 
 
 def warm_up(settings: Any) -> bool:
@@ -344,4 +420,6 @@ __all__ = [
     "get_embedder",
     "is_ready",
     "warm_up",
+    "warmup_progress",
+    "warmup_thread_niceness",
 ]

@@ -186,6 +186,25 @@ kit / specific sections).
 | `qm.tool.calls` | counter | 1 | `tool`, `ok` | MCP tool invocations. |
 | `qm.tool.duration` | histogram | ms | `tool`, `ok` | MCP tool call duration. |
 
+### Embedding warmup — *is the local model ready, and was it ever spiking CPU?*
+
+The background embedding warmup (configured via the `QM_EMBEDDINGS_THREADS`
+and `QM_EMBEDDINGS_WARMUP_NICENESS` settings) runs off the startup path on a
+dedicated thread; these gauges make its progress and actual OS scheduling
+priority observable without shelling into the container.
+
+| Metric | Type | Unit | Labels | Meaning |
+|---|---|---|---|---|
+| `qm.embeddings.ready` | gauge | 1 | — | `1` once warmup finished and `resolve_kits` can use embeddings; `0` while still degraded to the lexical floor. |
+| `qm.embeddings.warmup_docs_total` | gauge | 1 | — | Trait pseudo-documents to embed this warmup pass (catalog vocabulary size). |
+| `qm.embeddings.warmup_docs_done` | gauge | 1 | — | Trait pseudo-documents embedded so far this pass. |
+| `qm.embeddings.warmup_thread_niceness` | gauge | 1 | — | The warmup thread's OS niceness, read back live via `getpriority`; absent before warmup starts. Lets you confirm `QM_EMBEDDINGS_WARMUP_NICENESS` actually took effect — a process viewer like `htop` only shows this if it's configured to display individual threads, not just the main process row. |
+
+```promql
+# Warmup progress (0-1); stays at 1 once ready
+qm_embeddings_warmup_docs_done / qm_embeddings_warmup_docs_total
+```
+
 ---
 
 ## 3. KPI recipes (PromQL)

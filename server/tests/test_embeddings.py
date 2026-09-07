@@ -364,7 +364,9 @@ def test_warm_up_applies_configured_niceness(
 
 
 def test_warm_up_tolerates_niceness_not_supported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     fake = FakeEmbedder()
     monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
@@ -384,9 +386,104 @@ def test_warm_up_tolerates_niceness_not_supported(
         },
     )()
 
-    # Must not raise, and warmup still completes.
-    assert embeddings.warm_up(settings) is True
+    # Must not raise, and warmup still completes. The failure logs at
+    # WARNING (not DEBUG) so a blocked syscall — e.g. under a restrictive
+    # container seccomp profile — is visible in default-level logs.
+    with caplog.at_level("WARNING", logger=embeddings.logger.name):
+        assert embeddings.warm_up(settings) is True
     assert embeddings.is_ready() is True
+    assert any("niceness" in r.message for r in caplog.records)
+
+
+def test_build_trait_embeddings_reports_progress_on_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Force multiple chunks even for the small fixture catalog so progress
+    # is observed incrementing rather than jumping straight to "done".
+    monkeypatch.setattr(embeddings, "_EMBED_PROGRESS_CHUNK", 1)
+    fake = FakeEmbedder()
+    snapshots: list[tuple[int, int]] = []
+    original_encode = fake.encode
+
+    def _tracking_encode(texts: list[str]) -> list[list[float]]:
+        result = original_encode(texts)
+        snapshots.append(embeddings.warmup_progress())
+        return result
+
+    fake.encode = _tracking_encode  # type: ignore[method-assign]
+
+    assert embeddings.warmup_progress() == (0, 0)
+    embeddings.build_trait_embeddings(fake, tmp_path / "emb")
+
+    total = snapshots[-1][1]
+    assert total > 1  # the fixture catalog yields more than one trait doc
+    # Each snapshot is taken *during* a chunk's encode() call, so it reflects
+    # docs completed by prior chunks, not the in-flight one.
+    assert [done for done, _ in snapshots] == list(range(total))
+    assert embeddings.warmup_progress() == (total, total)
+
+
+def test_build_trait_embeddings_reports_full_progress_on_cache_hit(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "emb"
+    fake = FakeEmbedder()
+    first = build_trait_embeddings(fake, cache)
+    embeddings._warmup_progress.done = 0
+    embeddings._warmup_progress.total = 0
+
+    build_trait_embeddings(fake, cache)
+
+    assert embeddings.warmup_progress() == (len(first), len(first))
+
+
+def test_warmup_thread_niceness_reads_back_applied_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+    monkeypatch.setattr(embeddings.os, "nice", lambda n: n)
+    monkeypatch.setattr(embeddings.os, "getpriority", lambda _which, _who: 15)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_warmup_niceness": 15,
+        },
+    )()
+
+    assert embeddings.warmup_thread_niceness() is None
+    embeddings.warm_up(settings)
+    assert embeddings.warmup_thread_niceness() == 15
+
+
+def test_warmup_thread_niceness_none_when_query_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeEmbedder()
+    monkeypatch.setattr(embeddings, "get_embedder", lambda _s: fake)
+    monkeypatch.setattr(embeddings.os, "nice", lambda n: n)
+
+    def _boom(_which: int, _who: int) -> int:
+        raise OSError("not supported")
+
+    monkeypatch.setattr(embeddings.os, "getpriority", _boom)
+    settings = type(
+        "S",
+        (),
+        {
+            "embeddings_enabled": True,
+            "embeddings_model": "fake",
+            "embeddings_cache_dir": tmp_path,
+            "embeddings_warmup_niceness": 10,
+        },
+    )()
+
+    embeddings.warm_up(settings)
+    assert embeddings.warmup_thread_niceness() is None
 
 
 def test_build_trait_engines_excludes_embedding_until_warmed(
