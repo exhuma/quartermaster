@@ -1,6 +1,25 @@
 # Changelog
 
 
+## Release 2026.9.7 (2026-09-07)
+
+Startup no longer blocks on, or spikes host CPU from, warming the
+
+local embedding model — especially noticeable with a large kit
+
+catalog. See the [Ops] entry below for the new `QM_EMBEDDINGS_THREADS`
+
+/ `QM_EMBEDDINGS_WARMUP_NICENESS` settings.
+
+
+
+### Fixed
+- [Ops] Startup embedding warmup no longer blocks startup or spikes
+  host CPU *@ 2026.9.7b1*
+
+  A growing kit catalog could make the embedding-vocabulary warmup expensive enough, at full host CPU with no thread cap, that the container was killed and restarted before its listening socket ever opened. The warmup now runs on a dedicated background thread — capped to a configurable core count (`QM_EMBEDDINGS_THREADS`, default 2) and run at lower OS scheduling priority (`QM_EMBEDDINGS_WARMUP_NICENESS`, default 10, Linux-only) — so startup completes immediately and `resolve_kits` serves lexical-only results until embeddings finish warming in the background, with no risk of a request racing the warmup into a second concurrent model load.
+
+
 ## Release 2026.7.30 (2026-07-30)
 
 Kits that are genuinely tech-agnostic (design principles, code style,
