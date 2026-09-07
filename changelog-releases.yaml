@@ -14,8 +14,9 @@ releases:
     notes: |
       Startup no longer blocks on, or spikes host CPU from, warming the
       local embedding model — especially noticeable with a large kit
-      catalog. See the [Ops] entry below for the new `QM_EMBEDDINGS_THREADS`
-      / `QM_EMBEDDINGS_WARMUP_NICENESS` settings.
+      catalog. See the [Ops] entries below for the new
+      `QM_EMBEDDINGS_THREADS` / `QM_EMBEDDINGS_WARMUP_NICENESS` settings and
+      the new `/metrics` gauges for watching warmup progress.
   "2026.7.30":
     date: 2026-07-30
     notes: |

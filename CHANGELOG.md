@@ -7,10 +7,18 @@ Startup no longer blocks on, or spikes host CPU from, warming the
 
 local embedding model — especially noticeable with a large kit
 
-catalog. See the [Ops] entry below for the new `QM_EMBEDDINGS_THREADS`
+catalog. See the [Ops] entries below for the new
 
-/ `QM_EMBEDDINGS_WARMUP_NICENESS` settings.
+`QM_EMBEDDINGS_THREADS` / `QM_EMBEDDINGS_WARMUP_NICENESS` settings and
 
+the new `/metrics` gauges for watching warmup progress.
+
+
+
+### Added
+- [Ops] `/metrics` gauges for embedding warmup state *@ 2026.9.7b2*
+
+  Four new `qm.embeddings.*` observable gauges — `ready`, `warmup_docs_total`, `warmup_docs_done`, and `warmup_thread_niceness` — let operators watch background warmup progress through the catalog vocabulary and confirm `QM_EMBEDDINGS_WARMUP_NICENESS` actually took effect (read back live via `getpriority`), without shelling into the container. The vocabulary batch-encode is now chunked so progress advances visibly instead of jumping straight to done. A failed niceness syscall now logs at WARNING instead of DEBUG, so it is visible in default-level container logs.
 
 
 ### Fixed
