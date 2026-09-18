@@ -86,6 +86,18 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/prompts',
+      name: 'prompts',
+      component: () => import('@/views/PromptListView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/private-prompts',
+      name: 'private-prompts',
+      component: () => import('@/views/PrivatePromptsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/admin/users',
       name: 'admin-users',
       component: () => import('@/views/AdminUsersView.vue'),

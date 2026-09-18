@@ -57,6 +57,12 @@ watch(
         <v-btn variant="text" class="nav-btn" :to="{ name: 'private-kits' }">
           Private
         </v-btn>
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'prompts' }">
+          Prompts
+        </v-btn>
+        <v-btn variant="text" class="nav-btn" :to="{ name: 'private-prompts' }">
+          Private Prompts
+        </v-btn>
         <v-btn variant="text" class="nav-btn" :to="{ name: 'integration' }">
           Integrate
         </v-btn>

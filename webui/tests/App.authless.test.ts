@@ -56,6 +56,8 @@ const router = createRouter({
     { path: '/catalog', name: 'kits', component: stub },
     { path: '/integration', name: 'integration', component: stub },
     { path: '/private-kits', name: 'private-kits', component: stub },
+    { path: '/prompts', name: 'prompts', component: stub },
+    { path: '/private-prompts', name: 'private-prompts', component: stub },
     { path: '/mount', name: 'mount', component: stub },
     { path: '/metrics', name: 'metrics', component: stub },
     { path: '/admin/users', name: 'admin-users', component: stub },
