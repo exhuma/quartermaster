@@ -9,6 +9,12 @@ meta:
   version: "1.0"
 
 releases:
+  "2026.9.18":
+    date: 2026-09-18
+    notes: |
+      Catalog prompts get their own web UI: browse, create, edit, and delete
+      shared and private prompts without going through the REST API or MCP
+      tools directly.
   "2026.9.7":
     date: 2026-09-07
     notes: |

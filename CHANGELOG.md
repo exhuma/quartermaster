@@ -1,6 +1,22 @@
 # Changelog
 
 
+## Release 2026.9.18 (2026-09-18)
+
+Catalog prompts get their own web UI: browse, create, edit, and delete
+
+shared and private prompts without going through the REST API or MCP
+
+tools directly.
+
+
+
+### Added
+- [UI] Prompts and Private Prompts management pages *@ 2026.9.18b1*
+
+  The web UI can now browse, create, edit, and delete catalog prompts directly, mirroring the existing kit-management screens: a shared Prompts page (editor-role-gated writes) and a Private Prompts page (any authenticated user manages their own private prompts, no role required), both backed by the existing `/api/prompts` and `/api/private-prompts` REST endpoints.
+
+
 ## Release 2026.9.7 (2026-09-07)
 
 Startup no longer blocks on, or spikes host CPU from, warming the
