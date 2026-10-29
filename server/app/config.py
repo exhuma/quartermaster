@@ -397,9 +397,6 @@ class Settings(BaseSettings):
         task when the client supports it, instead of silently degrading. Set
         false to preserve the legacy empty-task ``ValueError`` / best-effort
         behaviour.
-    :param resolve_elicit_min_confidence: Selection-confidence threshold below
-        which ``resolve_kits`` will elicit clarification (when elicitation is
-        supported and enabled). Higher values elicit more eagerly.
     :param resolve_dedup_enabled: When true (default), ``resolve_kits`` avoids
         re-inlining ``always_load`` sections already delivered earlier in the
         same MCP session (see ``app/session_ledger.py``), listing them under
@@ -571,7 +568,6 @@ class Settings(BaseSettings):
     # them, and either can be disabled here.
     sampling_enabled: bool = True
     elicitation_enabled: bool = True
-    resolve_elicit_min_confidence: float = 0.25
     # Session-scoped resolve dedup: on repeat ``resolve_kits`` within one MCP
     # session (~ one conversation / context window), suppress re-inlining
     # ``always_load`` sections already delivered this session. In-memory,

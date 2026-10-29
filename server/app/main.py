@@ -858,12 +858,13 @@ async def _elicit_text(ctx: Context | None, message: str) -> str | None:
     return text or None
 
 
-def _is_low_confidence(result: dict, settings: Any) -> bool:
+def _is_low_confidence(result: dict) -> bool:
     """
     Return whether a resolve result is too weak to return without clarifying.
 
     Low confidence means either nothing was inferred at all, or the scorer
-    recommended broadening *and* confidence fell below the configured floor.
+    recommended broadening *and* rated the selection ``"low"`` (the selector
+    reports confidence as ``"high"``/``"medium"``/``"low"``).
     """
     traits = result.get("inferred_traits", {})
     has_traits = any(
@@ -872,13 +873,8 @@ def _is_low_confidence(result: dict, settings: Any) -> bool:
     )
     if not has_traits:
         return True
-    threshold = 0.25
-    if settings is not None:
-        threshold = getattr(
-            settings, "resolve_elicit_min_confidence", threshold
-        )
     return bool(result.get("broadening_recommended")) and (
-        result.get("confidence", 1.0) < threshold
+        result.get("confidence") == "low"
     )
 
 
@@ -1071,7 +1067,7 @@ async def resolve_kits(
     # One clarification round on a weak match: ask for detail, then re-resolve
     # with the enriched task. Declining keeps the best-effort first result.
     clarification_used = False
-    if can_elicit and _is_low_confidence(result, settings):
+    if can_elicit and _is_low_confidence(result):
         extra = await _elicit_text(ctx, _LOW_CONFIDENCE_ELICIT)
         if extra:
             clarification_used = True

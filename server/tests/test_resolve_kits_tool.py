@@ -255,7 +255,7 @@ def test_empty_task_elicits_when_supported(monkeypatch) -> None:
         return {
             "engine": "lexical",
             "kits": [],
-            "confidence": 0.9,
+            "confidence": "high",
             "broadening_recommended": False,
             "inferred_traits": {
                 "languages": [],
@@ -294,7 +294,7 @@ def test_low_confidence_elicits_and_reresolves(monkeypatch) -> None:
             return {
                 "engine": "lexical",
                 "kits": [],
-                "confidence": 0.1,
+                "confidence": "low",
                 "broadening_recommended": True,
                 "inferred_traits": {
                     "languages": [],
@@ -306,7 +306,7 @@ def test_low_confidence_elicits_and_reresolves(monkeypatch) -> None:
         return {
             "engine": "lexical",
             "kits": [{"name": "kit-alpha"}],
-            "confidence": 0.9,
+            "confidence": "high",
             "broadening_recommended": False,
             "inferred_traits": {
                 "languages": ["python"],
@@ -326,7 +326,7 @@ def test_low_confidence_elicits_and_reresolves(monkeypatch) -> None:
     assert len(calls) == 2
     assert "do stuff" in calls[1]
     assert "python fastapi" in calls[1]
-    assert result["confidence"] == 0.9
+    assert result["confidence"] == "high"
 
 
 def test_low_confidence_no_reresolve_when_user_declines(monkeypatch) -> None:
@@ -338,7 +338,7 @@ def test_low_confidence_no_reresolve_when_user_declines(monkeypatch) -> None:
         return {
             "engine": "lexical",
             "kits": [],
-            "confidence": 0.1,
+            "confidence": "low",
             "broadening_recommended": True,
             "inferred_traits": {
                 "languages": [],
@@ -356,7 +356,68 @@ def test_low_confidence_no_reresolve_when_user_declines(monkeypatch) -> None:
     result = _run(tool.fn(task="do stuff", ctx=_FakeCtx(elicitation=True)))
     # No second resolve: best-effort first result is returned.
     assert len(calls) == 1
-    assert result["confidence"] == 0.1
+    assert result["confidence"] == "low"
+
+
+def _weak_but_inferred(confidence: str) -> dict:
+    return {
+        "engine": "lexical",
+        "kits": [{"name": "kit-alpha"}],
+        "confidence": confidence,
+        "broadening_recommended": True,
+        "inferred_traits": {
+            "languages": ["python"],
+            "frameworks": [],
+            "capabilities": [],
+            "contexts": [],
+        },
+    }
+
+
+def test_low_label_with_traits_elicits(monkeypatch) -> None:
+    """
+    Ensure a "low" selection with inferred traits triggers clarification.
+    """
+    tool = _get_tool("resolve_kits")
+    calls: list[str] = []
+    prompts: list[str] = []
+
+    async def _fake_resolve_once(task, **kwargs):
+        calls.append(task)
+        return _weak_but_inferred("low")
+
+    async def _fake_elicit(ctx, message):
+        prompts.append(message)
+        return None
+
+    monkeypatch.setattr("app.main._resolve_once", _fake_resolve_once)
+    monkeypatch.setattr("app.main._elicit_text", _fake_elicit)
+    _run(tool.fn(task="do stuff", ctx=_FakeCtx(elicitation=True)))
+    assert len(prompts) == 1
+
+
+def test_medium_label_with_traits_does_not_elicit(monkeypatch) -> None:
+    """
+    Ensure a "medium" selection is returned without clarifying.
+
+    The selector reports confidence as a label; comparing it against a
+    numeric threshold used to raise ``TypeError`` on this path.
+    """
+    tool = _get_tool("resolve_kits")
+    prompts: list[str] = []
+
+    async def _fake_resolve_once(task, **kwargs):
+        return _weak_but_inferred("medium")
+
+    async def _fake_elicit(ctx, message):
+        prompts.append(message)
+        return None
+
+    monkeypatch.setattr("app.main._resolve_once", _fake_resolve_once)
+    monkeypatch.setattr("app.main._elicit_text", _fake_elicit)
+    result = _run(tool.fn(task="do stuff", ctx=_FakeCtx(elicitation=True)))
+    assert prompts == []
+    assert result["confidence"] == "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +582,7 @@ def test_diagnostics_reports_clarification_used(monkeypatch) -> None:
         if len(calls) == 1:
             return {
                 **_full_result(),
-                "confidence": 0.1,
+                "confidence": "low",
                 "broadening_recommended": True,
                 "inferred_traits": {
                     "languages": [],
