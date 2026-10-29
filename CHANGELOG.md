@@ -1,6 +1,25 @@
 # Changelog
 
 
+## Release 2026.10.29 (2026-10-29)
+
+`resolve_kits` no longer fails with a `TypeError` when a task's traits
+
+are inferred but the match is weak. Operators: the unused
+
+`QM_RESOLVE_ELICIT_MIN_CONFIDENCE` setting is removed; drop it from 
+any
+`.env` file, where an unknown key now fails settings validation.
+
+
+
+### Fixed
+- [MCP] `resolve_kits` no longer fails on weak matches with inferred
+  traits *@ 2026.10.29b1*
+
+  When a task's traits were inferred but the selection was weak enough to recommend broadening, `resolve_kits` raised a `TypeError` instead of returning kits or asking for clarification. It now asks for clarification only when the selection confidence is low, and otherwise returns the best match. The unused `QM_RESOLVE_ELICIT_MIN_CONFIDENCE` setting is removed.
+
+
 ## Release 2026.9.18 (2026-09-18)
 
 Catalog prompts get their own web UI: browse, create, edit, and delete

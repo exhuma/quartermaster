@@ -9,6 +9,13 @@ meta:
   version: "1.0"
 
 releases:
+  "2026.10.29":
+    date: 2026-10-29
+    notes: |
+      `resolve_kits` no longer fails with a `TypeError` when a task's traits
+      are inferred but the match is weak. Operators: the unused
+      `QM_RESOLVE_ELICIT_MIN_CONFIDENCE` setting is removed; drop it from any
+      `.env` file, where an unknown key now fails settings validation.
   "2026.9.18":
     date: 2026-09-18
     notes: |
