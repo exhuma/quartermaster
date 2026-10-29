@@ -21,7 +21,9 @@
 #---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # --- Unreleased (on main, ahead of the newest tag) -----------------------------------------------------------------------------------------------------------------
-unreleased    ; fixed    ; [MCP] `resolve_kits` no longer fails on weak matches with inferred traits      ;        ;   ;   ; When a task's traits were inferred but the selection was weak enough to recommend broadening, `resolve_kits` raised a `TypeError` instead of returning kits or asking for clarification. It now asks for clarification only when the selection confidence is low, and otherwise returns the best match. The unused `QM_RESOLVE_ELICIT_MIN_CONFIDENCE` setting is removed.
+
+# --- 2026.10.29 ------------------------------------------------------------------------------------------------------------------------------------------------------
+2026.10.29b1  ; fixed    ; [MCP] `resolve_kits` no longer fails on weak matches with inferred traits      ;        ;   ;   ; When a task's traits were inferred but the selection was weak enough to recommend broadening, `resolve_kits` raised a `TypeError` instead of returning kits or asking for clarification. It now asks for clarification only when the selection confidence is low, and otherwise returns the best match. The unused `QM_RESOLVE_ELICIT_MIN_CONFIDENCE` setting is removed.
 
 # --- 2026.9.18 -------------------------------------------------------------------------------------------------------------------------------------------------------
 2026.9.18b1   ; added    ; [UI] Prompts and Private Prompts management pages                              ;        ;   ;   ; The web UI can now browse, create, edit, and delete catalog prompts directly, mirroring the existing kit-management screens: a shared Prompts page (editor-role-gated writes) and a Private Prompts page (any authenticated user manages their own private prompts, no role required), both backed by the existing `/api/prompts` and `/api/private-prompts` REST endpoints.
